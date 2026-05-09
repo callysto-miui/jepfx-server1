@@ -30,6 +30,23 @@ def check_license():
     else:
         return jsonify({"status": "invalid", "message": "❌ Wrong License Key"}), 403
 
+@app.route('/api/check-password', methods=['POST'])
+def check_password():
+    data = request.get_json()
+    user = data.get("username","")
+    passw = data.get("password","")
+
+    # ✅ ONLY SERVER HAS USER LIST NOW
+    valid_users = {
+        "JEPFX": "@JEPFX_1875",
+        "SEAN": "SEAN_0",
+        "N4XCO": "N4XCO_0"
+    }
+
+    if user in valid_users and valid_users[user] == passw:
+        return jsonify({"status":"ok"}),200
+    return jsonify({"status":"denied"}),403
+
 
 @app.route('/api/check-update', methods=['GET'])
 def check_update():
