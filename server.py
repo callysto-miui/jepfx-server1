@@ -32,7 +32,7 @@ VALID_USERS = {
 TRIAL_LICENSES = {}
 TRIAL_USERS = {}
 
-# 🔑 ADMIN PASSWORD
+# 🔑 ADMIN PASSWORD — MUST MATCH ADMIN APP
 ADMIN_KEY = "JEPFX-ADMIN-2026"
 
 # ==================================================
@@ -81,7 +81,6 @@ def generate_trial():
     }),200
 
 
-# 🆕 GET ALL TRIALS FOR MONITOR
 @app.route('/api/admin/get-all-trials', methods=['POST'])
 def get_all_trials():
     data = request.get_json()
@@ -92,7 +91,6 @@ def get_all_trials():
     now = datetime.utcnow()
 
     for lic_key, lic_data in TRIAL_LICENSES.items():
-        # Calculate status & remaining time
         status = "NOT ACTIVATED"
         remaining = "-"
         if lic_data["start_time"]:
@@ -117,7 +115,6 @@ def get_all_trials():
     return jsonify({"trials": trials_list}),200
 
 
-# 🆕 DELETE / REVOKE TRIAL
 @app.route('/api/admin/delete-trial', methods=['POST'])
 def delete_trial():
     data = request.get_json()
@@ -126,11 +123,9 @@ def delete_trial():
 
     lic_key = data.get("license_key","")
     if lic_key in TRIAL_LICENSES:
-        # Also delete linked user
         for user, udata in list(TRIAL_USERS.items()):
             if udata["linked_license"] == lic_key:
                 del TRIAL_USERS[user]
-        # Delete license
         del TRIAL_LICENSES[lic_key]
         return jsonify({"status":"deleted"}),200
 
@@ -138,7 +133,7 @@ def delete_trial():
 
 
 # ==================================================
-# 🚀 ACTIVATE LICENSE (UPDATED)
+# 🚀 ACTIVATE LICENSE
 # ==================================================
 @app.route('/api/activate', methods=['POST'])
 def activate():
@@ -147,7 +142,6 @@ def activate():
     hwid = data.get("hardware_id", "").strip()
     now = datetime.utcnow()
 
-    # Permanent Licenses
     if key in LICENSES:
         lic = LICENSES[key]
         if lic["type"] == "unlimited":
@@ -163,23 +157,16 @@ def activate():
             else:
                 return jsonify({"status":"blocked","msg":"Used on another PC"}),403
 
-    # Trial Licenses
     if key in TRIAL_LICENSES:
         lic = TRIAL_LICENSES[key]
-
-        # FIRST USE → START TIMER
         if lic["start_time"] is None:
             lic["start_time"] = now
             lic["activated_at"] = now
             lic["expires_at"] = now + timedelta(hours=lic["duration_hours"])
             lic["hwid"] = hwid
             return jsonify({"status":"activated","msg":f"Trial active! Expires in {lic['duration_hours']}h"}),200
-
-        # CHECK IF EXPIRED
         if lic["expires_at"] and now > lic["expires_at"]:
             return jsonify({"status":"expired","msg":"Trial expired"}),403
-
-        # SAME PC?
         if lic["hwid"] == hwid:
             return jsonify({"status":"activated"}),200
         else:
@@ -198,16 +185,16 @@ def verify():
     key_hash = data.get("hash", "")
     now = datetime.utcnow()
 
-    # Check permanent
     for key, lic in LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
-            if lic["type"]=="unlimited" and hwid in lic["hwid"]: return jsonify({"ok":True}),200
-            if lic["type"]=="single" and lic["hwid"]==hwid: return jsonify({"ok":True}),200
+            if lic["type"]=="unlimited" and hwid in lic["hwid"]:
+                return jsonify({"ok":True}),200
+            if lic["type"]=="single" and lic["hwid"]==hwid:
+                return jsonify({"ok":True}),200
 
-    # Check trial
     for key, lic in TRIAL_LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
-            if lic["hwid"]==hwid and lic["expires_at] and now < lic["expires_at"]:
+            if lic["hwid"]==hwid and lic["expires_at"] and now < lic["expires_at"]:
                 return jsonify({"ok":True}),200
             if lic["expires_at"] and now > lic["expires_at"]:
                 return jsonify({"expired":True}),403
