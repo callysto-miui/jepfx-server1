@@ -9,6 +9,9 @@ VALID_USERS = ["JEPFX", "SEAN", "N4XCO"]
 CURRENT_VERSION = "BETA v6"
 
 # ---------------- API ENDPOINTS ----------------
+@app.route('/')
+def home():
+    return
 @app.route('/api/check-license', methods=['POST'])
 def check_license():
     data = request.get_json()
