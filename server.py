@@ -6,34 +6,16 @@ import uuid
 app = Flask(__name__)
 
 # ==================================================
-# 🔑 ADMIN KEY — PERMANENT, LOCKED, NEVER CHANGES
+# 🔑 ADMIN KEY — PERMANENT, LOCKED
 # ==================================================
 ADMIN_KEY = "JEPFX-ADMIN-2026"  
 
 # ==================================================
-# 📝 LICENSES & USERS — SEPARATED SAFELY
+# 📝 CLEAN DATABASE — NO DEFAULT LICENSES/USERS
 # ==================================================
-LICENSES = {
-    # 🔓 PERMANENT MASTER LICENSE (USE THIS IN TOOL)
-    "JEPFX-2026-SECRET": {
-        "type": "unlimited",
-        "hwid": [],
-        "expires_at": None,
-        "activated_at": None
-    },
-    # 🔒 5x SINGLE DEVICE LICENSES
-    "JEPFX-2026-001": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
-    "JEPFX-2026-002": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
-    "JEPFX-2026-003": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
-    "JEPFX-2026-004": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
-    "JEPFX-2026-005": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None}
-}
+LICENSES = {}  # ✅ EMPTY — YOU ADD ALL
 
-VALID_USERS = {
-    "JEPFX": "@JEPFX_1875",
-    "SEAN": "SEAN_0",
-    "N4XCO": "N4XCO_0"
-}
+VALID_USERS = {}  # ✅ EMPTY — YOU ADD ALL
 
 TRIAL_LICENSES = {}
 TRIAL_USERS = {}
@@ -52,9 +34,9 @@ def is_admin():
 # ==================================================
 @app.route('/')
 def home():
-    return "✅ JEPFX SERVER | FULLY FIXED"
+    return "✅ JEPFX SERVER | CLEAN & READY"
 
-# 🆕 CUSTOM ACTIVATION
+# 🆕 CUSTOM ACTIVATION — ADD YOUR OWN
 @app.route('/api/admin/add-custom-account', methods=['POST'])
 def add_custom_account():
     if not is_admin():
@@ -69,7 +51,7 @@ def add_custom_account():
     if not username or not password or not license_key:
         return jsonify({"status":"error","msg":"Fill all fields"}),400
 
-    # ⛔️ CANNOT ADD LICENSE KEY SAME AS ADMIN KEY
+    # ⛔️ CANNOT USE ADMIN KEY AS LICENSE
     if license_key == ADMIN_KEY:
         return jsonify({"status":"error","msg":"Cannot use Admin Key as license"}),400
 
@@ -84,7 +66,7 @@ def add_custom_account():
     return jsonify({"status":"success","validity_hours": duration_hours}),200
 
 
-# ⚡ GENERATE TRIAL
+# ⚡ GENERATE TRIAL — WORKS PERFECT
 @app.route('/api/admin/generate-trial', methods=['POST'])
 def generate_trial():
     if not is_admin():
@@ -148,9 +130,6 @@ def get_all():
                 else:
                     status = "❌ EXPIRED"
                     remaining = "EXPIRED"
-
-        elif lic_data["type"] == "single":
-            status = "✅ ACTIVATED" if lic_data["hwid"] != "" else "⭕ NOT ACTIVATED"
 
         all_list.append({
             "type": "LICENSE",
@@ -247,16 +226,6 @@ def activate():
                 return jsonify({"status":"expired","msg":"License expired"}),403
             return jsonify({"status":"activated"}),200
 
-        if lic["type"] == "single":
-            if lic["hwid"] == "":
-                lic["hwid"] = hwid
-                lic["activated_at"] = now
-                return jsonify({"status":"activated"}),200
-            elif lic["hwid"] == hwid:
-                return jsonify({"status":"activated"}),200
-            else:
-                return jsonify({"status":"blocked","msg":"Used on another PC"}),403
-
     # TRIALS
     if key in TRIAL_LICENSES:
         lic = TRIAL_LICENSES[key]
@@ -292,8 +261,6 @@ def verify():
                     return jsonify({"ok":True}),200
                 else:
                     return jsonify({"expired":True}),403
-            if lic["type"]=="single" and lic["hwid"]==hwid:
-                return jsonify({"ok":True}),200
 
     # TRIALS
     for key, lic in TRIAL_LICENSES.items():
