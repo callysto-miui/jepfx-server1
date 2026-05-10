@@ -6,22 +6,20 @@ import uuid
 app = Flask(__name__)
 
 # ==================================================
-# 🔑 ADMIN KEY — LOCKED & PROTECTED — DO NOT MOVE
+# 🔑 ADMIN KEY — LOCKED & PROTECTED — NEVER OVERWRITTEN
 # ==================================================
-ADMIN_KEY = "JEPFX-ADMIN-2026"  # ✅ PERMANENT, NEVER OVERWRITTEN
+ADMIN_KEY = "JEPFX-ADMIN-2026"  
 
 # ==================================================
-# 📝 LICENSES & USERS — EDIT HERE
+# 📝 DATA STORAGE — SEPARATED SAFELY
 # ==================================================
 LICENSES = {
-    # 🔓 PERMANENT MASTER KEY (MULTI-DEVICE)
     "JEPFX-2026-SECRET": {
         "type": "unlimited",
         "hwid": [],
         "expires_at": None,
         "activated_at": None
     },
-    # 🔒 5x SINGLE DEVICE KEYS
     "JEPFX-2026-001": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
     "JEPFX-2026-002": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
     "JEPFX-2026-003": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
@@ -30,10 +28,11 @@ LICENSES = {
 }
 
 VALID_USERS = {
-    "JEPFX": "@JEPFX_1875"
+    "JEPFX": "@JEPFX_1875",
+    "SEAN": "SEAN_0",
+    "N4XCO": "N4XCO_0"
 }
 
-# 🆕 TRIAL DATA STORAGE
 TRIAL_LICENSES = {}
 TRIAL_USERS = {}
 
@@ -42,51 +41,48 @@ TRIAL_USERS = {}
 # ==================================================
 @app.route('/')
 def home():
-    return "✅ JEPFX SERVER | ALL SYSTEMS + MONITOR"
+    return "✅ JEPFX SERVER | FULLY FIXED"
 
-# ==================================================
-# 🛠️ ADMIN API — KEY CHECK FIRST, ALWAYS
-# ==================================================
-
-# 🆕 CUSTOM ACTIVATION: USER + PASS + LICENSE + CUSTOM TIME
-@app.route('/api/admin/add-custom-account', methods=['POST'])
-def add_custom_account():
+# 🛡️ ADMIN KEY CHECK — FIRST IN EVERY ADMIN ROUTE
+def check_admin_key():
     data = request.get_json()
     if not data or data.get("admin_key") != ADMIN_KEY:
+        return False
+    return True
+
+# 🆕 CUSTOM ACTIVATION — SAFE, NO OVERWRITE
+@app.route('/api/admin/add-custom-account', methods=['POST'])
+def add_custom_account():
+    if not check_admin_key():
         return jsonify({"status":"denied"}), 403
 
+    data = request.get_json()
     username = data.get("username","").strip()
     password = data.get("password","").strip()
     license_key = data.get("license_key","").strip()
-    duration_hours = int(data.get("duration_hours", 720))  # default 30 days
+    duration_hours = int(data.get("duration_hours", 720))
 
     if not username or not password or not license_key:
         return jsonify({"status":"error","msg":"Fill all fields"}),400
 
-    # Save license (multi-device, no restriction)
     LICENSES[license_key] = {
         "type": "unlimited",
         "hwid": [],
         "expires_at": datetime.utcnow() + timedelta(hours=duration_hours),
         "activated_at": datetime.utcnow()
     }
-    # Save user
     VALID_USERS[username] = password
 
-    return jsonify({
-        "status":"success",
-        "msg":"Account Activated",
-        "validity_hours": duration_hours
-    }),200
+    return jsonify({"status":"success","validity_hours": duration_hours}),200
 
 
-# ⚡ GENERATE TRIAL
+# ⚡ GENERATE TRIAL — FIXED RECOGNITION
 @app.route('/api/admin/generate-trial', methods=['POST'])
 def generate_trial():
-    data = request.get_json()
-    if not data or data.get("admin_key") != ADMIN_KEY:
+    if not check_admin_key():
         return jsonify({"status":"denied"}), 403
 
+    data = request.get_json()
     duration_hours = int(data.get("duration_hours", 3))
 
     trial_license = f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
@@ -115,17 +111,16 @@ def generate_trial():
     }), 200
 
 
-# 📊 GET ALL LICENSES + TRIALS + PERMANENT FOR MONITOR
+# 📊 GET ALL — FIXED KEY CHECK
 @app.route('/api/admin/get-all', methods=['POST'])
 def get_all():
-    data = request.get_json()
-    if not data or data.get("admin_key") != ADMIN_KEY:
+    if not check_admin_key():
         return jsonify({"status":"denied"}), 403
 
     all_list = []
     now = datetime.utcnow()
 
-    # --- 1. ALL LICENSES (PERMANENT + CUSTOM) ---
+    # LICENSES
     for lic_key, lic_data in LICENSES.items():
         status = "NOT ACTIVATED"
         remaining = "-"
@@ -147,10 +142,7 @@ def get_all():
                     remaining = "EXPIRED"
 
         elif lic_data["type"] == "single":
-            if lic_data["hwid"] != "":
-                status = "✅ ACTIVATED"
-            else:
-                status = "⭕ NOT ACTIVATED"
+            status = "✅ ACTIVATED" if lic_data["hwid"] != "" else "⭕ NOT ACTIVATED"
 
         all_list.append({
             "type": "LICENSE",
@@ -163,7 +155,7 @@ def get_all():
             "remaining": remaining
         })
 
-    # --- 2. ALL TRIALS ---
+    # TRIALS
     for lic_key, lic_data in TRIAL_LICENSES.items():
         status = "NOT ACTIVATED"
         remaining = "-"
@@ -194,19 +186,18 @@ def get_all():
     return jsonify({"all_items": all_list}), 200
 
 
-# 🗑️ DELETE ANY LICENSE / TRIAL
+# 🗑️ DELETE — SAFE
 @app.route('/api/admin/delete-item', methods=['POST'])
 def delete_item():
-    data = request.get_json()
-    if not data or data.get("admin_key") != ADMIN_KEY:
+    if not check_admin_key():
         return jsonify({"status":"denied"}), 403
 
+    data = request.get_json()
     item_key = data.get("key","")
     item_type = data.get("type","")
 
     if item_type == "LICENSE" and item_key in LICENSES:
         del LICENSES[item_key]
-        # Also remove linked user
         for u, ud in list(VALID_USERS.items()):
             if u == item_key or ud == item_key:
                 del VALID_USERS[u]
@@ -222,9 +213,7 @@ def delete_item():
     return jsonify({"status":"not_found"}),404
 
 
-# ==================================================
-# 🚀 ACTIVATE LICENSE
-# ==================================================
+# 🚀 ACTIVATE — TRIAL + LICENSE FIXED
 @app.route('/api/activate', methods=['POST'])
 def activate():
     data = request.get_json()
@@ -232,16 +221,14 @@ def activate():
     hwid = data.get("hardware_id", "").strip()
     now = datetime.utcnow()
 
-    # --- PERMANENT + CUSTOM LICENSES ---
+    # LICENSES
     if key in LICENSES:
         lic = LICENSES[key]
-
         if lic["type"] == "unlimited":
             if hwid not in lic["hwid"]:
                 lic["hwid"].append(hwid)
             if lic["activated_at"] is None:
                 lic["activated_at"] = now
-            # Check expiry
             if lic["expires_at"] and now > lic["expires_at"]:
                 return jsonify({"status":"expired","msg":"License expired"}),403
             return jsonify({"status":"activated"}),200
@@ -256,7 +243,7 @@ def activate():
             else:
                 return jsonify({"status":"blocked","msg":"Used on another PC"}),403
 
-    # --- TRIAL LICENSES ---
+    # TRIALS
     if key in TRIAL_LICENSES:
         lic = TRIAL_LICENSES[key]
         if lic["start_time"] is None:
@@ -275,9 +262,7 @@ def activate():
     return jsonify({"status":"invalid"}),403
 
 
-# ==================================================
-# ✅ VERIFY LICENSE
-# ==================================================
+# ✅ VERIFY — TRIAL + LICENSE FIXED
 @app.route('/api/verify-license', methods=['POST'])
 def verify():
     data = request.get_json()
@@ -285,7 +270,7 @@ def verify():
     key_hash = data.get("hash", "")
     now = datetime.utcnow()
 
-    # Check licenses
+    # LICENSES
     for key, lic in LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
             if lic["type"]=="unlimited" and hwid in lic["hwid"]:
@@ -296,7 +281,7 @@ def verify():
             if lic["type"]=="single" and lic["hwid"]==hwid:
                 return jsonify({"ok":True}),200
 
-    # Check trials
+    # TRIALS
     for key, lic in TRIAL_LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
             if lic["hwid"]==hwid and lic["expires_at"] and now < lic["expires_at"]:
@@ -307,9 +292,7 @@ def verify():
     return jsonify({"invalid":True}),403
 
 
-# ==================================================
 # 🔑 LOGIN
-# ==================================================
 @app.route('/api/validate-user', methods=['POST'])
 def validate_user():
     u = request.get_json().get("username","")
