@@ -40,7 +40,7 @@ def is_admin():
 def home():
     return "✅ JEPFX SERVER | FULLY LOCKED"
 
-# ⚡ GENERATE TRIAL
+# ⚡ GENERATE TRIAL — ✅ FIXED LINE 51 ERROR HERE
 @app.route('/api/admin/generate-trial', methods=['POST'])
 def generate_trial():
     if not is_admin():
@@ -48,7 +48,7 @@ def generate_trial():
     data = request.get_json()
     duration_hours = int(data.get("duration_hours", 3))
     trial_license = f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
-    trial_user = f"TRIAL-{uuid.uuid4().hex[:6).upper()}"
+    trial_user = f"TRIAL-{uuid.uuid4().hex[:6].upper()}"  # ✅ FIXED SYNTAX ERROR
     trial_pass = uuid.uuid4().hex[:10].upper()
     TRIAL_LICENSES[trial_license] = {
         "type": "trial", "hwid": "", "duration_hours": duration_hours,
