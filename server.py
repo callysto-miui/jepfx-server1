@@ -6,6 +6,11 @@ import uuid
 app = Flask(__name__)
 
 # ==================================================
+# 🔑 ADMIN KEY — LOCKED & PROTECTED — DO NOT MOVE
+# ==================================================
+ADMIN_KEY = "JEPFX-ADMIN-2026"  # ✅ PERMANENT, NEVER OVERWRITTEN
+
+# ==================================================
 # 📝 LICENSES & USERS — EDIT HERE
 # ==================================================
 LICENSES = {
@@ -30,15 +35,9 @@ VALID_USERS = {
     "N4XCO": "N4XCO_0"
 }
 
-# 🆕 CUSTOM ACTIVATED ACCOUNTS (MULTI-DEVICE + EXPIRY)
-CUSTOM_ACCOUNTS = {}
-
 # 🆕 TRIAL DATA STORAGE
 TRIAL_LICENSES = {}
 TRIAL_USERS = {}
-
-# 🔑 ADMIN KEY — **EXACT SAME IN BOTH FILES**
-ADMIN_KEY = "JEPFX-ADMIN-2026"
 
 # ==================================================
 # 🚀 ROUTES
@@ -48,10 +47,10 @@ def home():
     return "✅ JEPFX SERVER | ALL SYSTEMS + MONITOR"
 
 # ==================================================
-# 🛠️ ADMIN API
+# 🛠️ ADMIN API — KEY CHECK FIRST, ALWAYS
 # ==================================================
 
-# 🆕 CUSTOM ACTIVATION: USER + PASS + LICENSE + DURATION
+# 🆕 CUSTOM ACTIVATION: USER + PASS + LICENSE + CUSTOM TIME
 @app.route('/api/admin/add-custom-account', methods=['POST'])
 def add_custom_account():
     data = request.get_json()
@@ -61,7 +60,7 @@ def add_custom_account():
     username = data.get("username","").strip()
     password = data.get("password","").strip()
     license_key = data.get("license_key","").strip()
-    duration_days = int(data.get("duration_days", 30))
+    duration_hours = int(data.get("duration_hours", 720))  # default 30 days
 
     if not username or not password or not license_key:
         return jsonify({"status":"error","msg":"Fill all fields"}),400
@@ -70,13 +69,17 @@ def add_custom_account():
     LICENSES[license_key] = {
         "type": "unlimited",
         "hwid": [],
-        "expires_at": datetime.utcnow() + timedelta(days=duration_days),
+        "expires_at": datetime.utcnow() + timedelta(hours=duration_hours),
         "activated_at": datetime.utcnow()
     }
     # Save user
     VALID_USERS[username] = password
 
-    return jsonify({"status":"success","msg":"Account Activated"}),200
+    return jsonify({
+        "status":"success",
+        "msg":"Account Activated",
+        "validity_hours": duration_hours
+    }),200
 
 
 # ⚡ GENERATE TRIAL
@@ -204,11 +207,11 @@ def delete_item():
     item_type = data.get("type","")
 
     if item_type == "LICENSE" and item_key in LICENSES:
-        # Also remove linked user if exists
-        for u, ud in list(VALID_USERS.items()):
-            if u.startswith("CUSTOM_"):
-                del VALID_USERS[u]
         del LICENSES[item_key]
+        # Also remove linked user
+        for u, ud in list(VALID_USERS.items()):
+            if u == item_key or ud == item_key:
+                del VALID_USERS[u]
         return jsonify({"status":"deleted"}),200
 
     if item_type == "TRIAL" and item_key in TRIAL_LICENSES:
@@ -292,7 +295,7 @@ def verify():
                     return jsonify({"ok":True}),200
                 else:
                     return jsonify({"expired":True}),403
-            if lic["type"]=="single" and lic["hwidid"]==hwid:
+            if lic["type"]=="single" and lic["hwid"]==hwid:
                 return jsonify({"ok":True}),200
 
     # Check trials
