@@ -1,27 +1,25 @@
 from flask import Flask, request, jsonify
-import hashlib
 from datetime import datetime, timedelta
 import uuid
 
 app = Flask(__name__)
 
-# 🔑 EXACT KEY — BOTH SIDES MUST BE SAME
+# 🔑 ADMIN KEY — LOCKED, HARDCODED, CANNOT BE CHANGED/DELETED/OVERWRITTEN
 ADMIN_KEY = "JEPFX-ADMIN-2026"
 
-# 📝 DATABASE
+# 📝 DATABASE — SEPARATE, ADMIN KEY NEVER GOES HERE
 LICENSES = {}
 VALID_USERS = {}
 TRIAL_LICENSES = {}
 TRIAL_USERS = {}
 
-# 🛡️ ADMIN CHECK — SIMPLE, NO HASH, NO TRICKS, 100% RELIABLE
+# 🛡️ ADMIN CHECK — SIMPLE, DIRECT, NO HASH, NO BUGS
 def is_admin():
     try:
         data = request.get_json(force=True, silent=True)
         if not data:
             return False
-        received = str(data.get("admin_key", "")).strip()
-        return received == ADMIN_KEY
+        return str(data.get("admin_key", "")).strip() == ADMIN_KEY
     except:
         return False
 
@@ -45,9 +43,14 @@ def generate_trial():
         "start_time":None, "expires_at":None, "activated_at":None
     }
     TRIAL_USERS[trial_user] = {"password":trial_pass, "linked_license":trial_lic}
-    return jsonify({"trial_license":trial_lic, "trial_username":trial_user, "trial_password":trial_pass, "duration_hours":dur}), 200
+    return jsonify({
+        "trial_license":trial_lic,
+        "trial_username":trial_user,
+        "trial_password":trial_pass,
+        "duration_hours":dur
+    }), 200
 
-# ➕ CUSTOM ACTIVATION
+# ➕ CUSTOM ACTIVATION — ❌ BLOCK USING ADMIN KEY AS LICENSE
 @app.route('/api/admin/add-custom-account', methods=['POST'])
 def add_custom():
     if not is_admin():
@@ -59,8 +62,10 @@ def add_custom():
     dur = int(data.get("duration_hours", 720))
     if not user or not pwd or not lic:
         return jsonify({"status":"error"}),400
+    # ❌ CRITICAL: CANNOT USE ADMIN KEY AS LICENSE
     if lic == ADMIN_KEY:
-        return jsonify({"status":"error"}),400
+        return jsonify({"status":"error","msg":"❌ CANNOT USE ADMIN KEY"}),400
+    # ✅ ADD LICENSE — NEVER TOUCH ADMIN KEY
     LICENSES[lic] = {
         "type":"unlimited", "hwid":[],
         "expires_at":datetime.utcnow() + timedelta(hours=dur),
@@ -69,14 +74,11 @@ def add_custom():
     VALID_USERS[user] = pwd
     return jsonify({"status":"success"}),200
 
-# 📊 GET ALL / REFRESH — ✅ FIXED FOREVER
+# 📊 GET ALL / REFRESH — ✅ ADMIN KEY 100% SAFE
 @app.route('/api/admin/get-all', methods=['POST'])
 def get_all():
-    print("🔍 REFRESH REQUEST RECEIVED") # DEBUG LOG
     if not is_admin():
-        print("❌ ADMIN KEY WRONG") # DEBUG LOG
         return jsonify({"status":"denied"}), 403
-    print("✅ ADMIN KEY CORRECT — SENDING DATA") # DEBUG LOG
     all_list = []
     now = datetime.utcnow()
     # LICENSES
@@ -108,7 +110,7 @@ def get_all():
         })
     return jsonify({"all_items":all_list}), 200
 
-# 🗑️ DELETE
+# 🗑️ DELETE — ❌ CANNOT DELETE ADMIN KEY
 @app.route('/api/admin/delete-item', methods=['POST'])
 def delete_item():
     if not is_admin():
@@ -117,30 +119,34 @@ def delete_item():
     key = str(data.get("key","")).strip()
     typ = str(data.get("type","")).strip()
     if key == ADMIN_KEY:
-        return jsonify({"status":"error"}),400
+        return jsonify({"status":"error","msg":"❌ CANNOT DELETE ADMIN KEY"}),400
     if typ == "LICENSE" and key in LICENSES: del LICENSES[key]; return jsonify({"status":"ok"}),200
     if typ == "TRIAL" and key in TRIAL_LICENSES: del TRIAL_LICENSES[key]; return jsonify({"status":"ok"}),200
     return jsonify({"status":"notfound"}),404
 
-# 🔓 ACTIVATE
+# 🔓 ACTIVATE — ✅ FIXED: NO OVERWRITE, NO BUGS
 @app.route('/api/activate', methods=['POST'])
 def activate():
     data = request.get_json()
     key = str(data.get("license_key","")).strip()
     hwid = str(data.get("hardware_id","")).strip()
     now = datetime.utcnow()
-    if key == ADMIN_KEY: return jsonify({"status":"invalid"}),403
+    # ❌ BLOCK ADMIN KEY HERE TOO
+    if key == ADMIN_KEY:
+        return jsonify({"status":"invalid","msg":"❌ USE LICENSE KEY NOT ADMIN KEY"}),403
+    # ✅ LICENSES
     if key in LICENSES:
         lic = LICENSES[key]
         if hwid not in lic["hwid"]: lic["hwid"].append(hwid)
-        return jsonify({"status":"ok"}),200
+        return jsonify({"status":"activated"}),200
+    # ✅ TRIALS
     if key in TRIAL_LICENSES:
         lic = TRIAL_LICENSES[key]
         if not lic["start_time"]:
             lic["start_time"]=now; lic["activated_at"]=now; lic["expires_at"]=now+timedelta(hours=lic["duration_hours"]); lic["hwid"]=hwid
-            return jsonify({"status":"ok"}),200
-        if lic["hwid"]==hwid: return jsonify({"status":"ok"}),200
-        return jsonify({"status":"blocked"}),403
+            return jsonify({"status":"activated"}),200
+        if lic["hwid"]==hwid: return jsonify({"status":"activated"}),200
+        return jsonify({"status":"blocked","msg":"❌ TRIAL USED ON ANOTHER PC"}),403
     return jsonify({"status":"invalid"}),403
 
 # ✅ VERIFY / LOGIN
@@ -150,6 +156,7 @@ def verify():
     hwid = str(data.get("hwid","")).strip()
     key_hash = str(data.get("hash","")).strip()
     now = datetime.utcnow()
+    import hashlib
     for k,v in LICENSES.items():
         if hashlib.sha256(k.encode()).hexdigest()==key_hash and hwid in v["hwid"] and v["expires_at"]>now: return jsonify({"ok":True}),200
     for k,v in TRIAL_LICENSES.items():
