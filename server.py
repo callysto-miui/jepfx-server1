@@ -6,20 +6,22 @@ import uuid
 app = Flask(__name__)
 
 # ==================================================
-# 🔑 ADMIN KEY — LOCKED & PROTECTED — NEVER OVERWRITTEN
+# 🔑 ADMIN KEY — PERMANENT, LOCKED, NEVER CHANGES
 # ==================================================
 ADMIN_KEY = "JEPFX-ADMIN-2026"  
 
 # ==================================================
-# 📝 DATA STORAGE — SEPARATED SAFELY
+# 📝 LICENSES & USERS — SEPARATED SAFELY
 # ==================================================
 LICENSES = {
+    # 🔓 PERMANENT MASTER LICENSE (USE THIS IN TOOL)
     "JEPFX-2026-SECRET": {
         "type": "unlimited",
         "hwid": [],
         "expires_at": None,
         "activated_at": None
     },
+    # 🔒 5x SINGLE DEVICE LICENSES
     "JEPFX-2026-001": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
     "JEPFX-2026-002": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
     "JEPFX-2026-003": {"type": "single", "hwid": "", "expires_at": None, "activated_at": None},
@@ -28,11 +30,22 @@ LICENSES = {
 }
 
 VALID_USERS = {
-    "JEPFX": "@JEPFX_1875"
+    "JEPFX": "@JEPFX_1875",
+    "SEAN": "SEAN_0",
+    "N4XCO": "N4XCO_0"
 }
 
 TRIAL_LICENSES = {}
 TRIAL_USERS = {}
+
+# ==================================================
+# 🛡️ SAFE ADMIN CHECK — NEVER FAILS
+# ==================================================
+def is_admin():
+    data = request.get_json()
+    if not data or "admin_key" not in data:
+        return False
+    return data.get("admin_key") == ADMIN_KEY
 
 # ==================================================
 # 🚀 ROUTES
@@ -41,17 +54,10 @@ TRIAL_USERS = {}
 def home():
     return "✅ JEPFX SERVER | FULLY FIXED"
 
-# 🛡️ ADMIN KEY CHECK — FIRST IN EVERY ADMIN ROUTE
-def check_admin_key():
-    data = request.get_json()
-    if not data or data.get("admin_key") != ADMIN_KEY:
-        return False
-    return True
-
-# 🆕 CUSTOM ACTIVATION — SAFE, NO OVERWRITE
+# 🆕 CUSTOM ACTIVATION
 @app.route('/api/admin/add-custom-account', methods=['POST'])
 def add_custom_account():
-    if not check_admin_key():
+    if not is_admin():
         return jsonify({"status":"denied"}), 403
 
     data = request.get_json()
@@ -62,6 +68,10 @@ def add_custom_account():
 
     if not username or not password or not license_key:
         return jsonify({"status":"error","msg":"Fill all fields"}),400
+
+    # ⛔️ CANNOT ADD LICENSE KEY SAME AS ADMIN KEY
+    if license_key == ADMIN_KEY:
+        return jsonify({"status":"error","msg":"Cannot use Admin Key as license"}),400
 
     LICENSES[license_key] = {
         "type": "unlimited",
@@ -74,10 +84,10 @@ def add_custom_account():
     return jsonify({"status":"success","validity_hours": duration_hours}),200
 
 
-# ⚡ GENERATE TRIAL — FIXED RECOGNITION
+# ⚡ GENERATE TRIAL
 @app.route('/api/admin/generate-trial', methods=['POST'])
 def generate_trial():
-    if not check_admin_key():
+    if not is_admin():
         return jsonify({"status":"denied"}), 403
 
     data = request.get_json()
@@ -109,10 +119,10 @@ def generate_trial():
     }), 200
 
 
-# 📊 GET ALL — FIXED KEY CHECK
+# 📊 GET ALL / REFRESH — 100% FIXED
 @app.route('/api/admin/get-all', methods=['POST'])
 def get_all():
-    if not check_admin_key():
+    if not is_admin():
         return jsonify({"status":"denied"}), 403
 
     all_list = []
@@ -184,15 +194,18 @@ def get_all():
     return jsonify({"all_items": all_list}), 200
 
 
-# 🗑️ DELETE — SAFE
+# 🗑️ DELETE
 @app.route('/api/admin/delete-item', methods=['POST'])
 def delete_item():
-    if not check_admin_key():
+    if not is_admin():
         return jsonify({"status":"denied"}), 403
 
     data = request.get_json()
     item_key = data.get("key","")
     item_type = data.get("type","")
+
+    if item_key == ADMIN_KEY:
+        return jsonify({"status":"error","msg":"Cannot delete Admin Key"}),400
 
     if item_type == "LICENSE" and item_key in LICENSES:
         del LICENSES[item_key]
@@ -211,13 +224,16 @@ def delete_item():
     return jsonify({"status":"not_found"}),404
 
 
-# 🚀 ACTIVATE — TRIAL + LICENSE FIXED
+# 🚀 ACTIVATE
 @app.route('/api/activate', methods=['POST'])
 def activate():
     data = request.get_json()
     key = data.get("license_key", "").strip()
     hwid = data.get("hardware_id", "").strip()
     now = datetime.utcnow()
+
+    if key == ADMIN_KEY:
+        return jsonify({"status":"invalid","msg":"Use LICENSE KEY, not Admin Key"}),403
 
     # LICENSES
     if key in LICENSES:
@@ -260,7 +276,7 @@ def activate():
     return jsonify({"status":"invalid"}),403
 
 
-# ✅ VERIFY — TRIAL + LICENSE FIXED
+# ✅ VERIFY
 @app.route('/api/verify-license', methods=['POST'])
 def verify():
     data = request.get_json()
