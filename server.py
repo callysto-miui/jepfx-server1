@@ -25,7 +25,7 @@ LICENSES = {
 VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
     "SEAN": "SEAN_0",
-    "N4XCO": "N4XCO_0"
+    "N4XCO": "N4XCO_0",
     "RHYZ": "RHYZ_0"
 }
 
