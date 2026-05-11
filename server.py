@@ -1,21 +1,20 @@
 from flask import Flask, request, jsonify
 import hashlib
-import datetime
-import os
+from datetime import datetime, timedelta
+import uuid
 
 app = Flask(__name__)
 
-# ==============================================
-# ✅ EXACT YOUR LICENSES — PERMANENT / 1PC LOGIC
-# ==============================================
+# ==================================================
+# 📝 LICENSES & USERS — EDIT HERE
+# ==================================================
 LICENSES = {
-    # 🔓 PERMANENT / UNLIMITED KEYS (CAN BE USED ON MULTIPLE PCS)
-    "JEPFX-2026-SECRET": {
+    # 🔓 PERMANENT KEYS
+    "JEPFX-2026": {
         "type": "unlimited",
         "hwid": [],
         "expires_at": None
     },
-    # 🔒 SINGLE PC KEYS (1 KEY = 1 DEVICE ONLY)
     "JEPFX-2026-001": {"type": "single", "hwid": "", "expires_at": None},
     "JEPFX-2026-002": {"type": "single", "hwid": "", "expires_at": None},
     "JEPFX-2026-003": {"type": "single", "hwid": "", "expires_at": None},
@@ -23,9 +22,6 @@ LICENSES = {
     "JEPFX-2026-005": {"type": "single", "hwid": "", "expires_at": None}
 }
 
-# ==============================================
-# ✅ EXACT YOUR VALID USERS
-# ==============================================
 VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
     "SEAN": "SEAN_0",
@@ -33,138 +29,185 @@ VALID_USERS = {
     "RHYZ": "RHYZ_0"
 }
 
-# ==============================================
-# ✅ API ROUTES — FULLY WORKING + YOUR LOGIC
-# ==============================================
+# 🆕 TRIAL DATA STORAGE
+TRIAL_LICENSES = {}
+TRIAL_USERS = {}
 
-# --------------------------
-# 1. ACTIVATE LICENSE
-# --------------------------
-@app.route('/api/activate', methods=['POST'])
-def activate_license():
-    try:
-        data = request.get_json()
-        license_key = data.get('license_key', '').strip()
-        hardware_id = data.get('hardware_id', '').strip()
+# 🔑 ADMIN KEY — **EXACT SAME IN BOTH FILES**
+ADMIN_KEY = "JEPFX-ADMIN-2026"
 
-        if not license_key or not hardware_id:
-            return jsonify({"msg": "Missing required fields"}), 400
+# ==================================================
+# 🚀 ROUTES
+# ==================================================
+@app.route('/')
+def home():
+    return "✅ JEPFX SERVER | PERMANENT + TRIAL + MONITOR"
 
-        # Check if key exists
-        if license_key not in LICENSES:
-            return jsonify({"msg": "❌ Invalid License Key"}), 403
+# 🛠️ GENERATE TRIAL
+@app.route('/api/admin/generate-trial', methods=['POST'])
+def generate_trial():
+    data = request.get_json()
+    if not data or data.get("admin_key") != ADMIN_KEY:
+        return jsonify({"status":"denied"}), 403
 
-        key_data = LICENSES[license_key]
-        key_type = key_data["type"]
+    duration_hours = int(data.get("duration_hours", 3))
 
-        # ✅ UNLIMITED / PERMANENT KEY — ALLOW ANY PC
-        if key_type == "unlimited":
-            if hardware_id not in key_data["hwid"]:
-                key_data["hwid"].append(hardware_id)
-            return jsonify({"msg": "✅ Activated Successfully! (Unlimited Key)"}), 200
+    trial_license = f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
+    trial_user = f"TRIAL-{uuid.uuid4().hex[:6].upper()}"
+    trial_pass = uuid.uuid4().hex[:10].upper()
 
-        # ✅ SINGLE PC KEY — ONLY 1 DEVICE
-        elif key_type == "single":
-            if key_data["hwid"] == "":
-                # First activation — save this PC
-                key_data["hwid"] = hardware_id
-                return jsonify({"msg": "✅ Activated Successfully! (Single PC)"}), 200
-            elif key_data["hwid"] == hardware_id:
-                # Same PC — already activated
-                return jsonify({"msg": "✅ Already Activated on this PC"}), 200
-            else:
-                # Different PC — BLOCK
-                return jsonify({"msg": "❌ Key registered to another PC"}), 403
+    TRIAL_LICENSES[trial_license] = {
+        "type": "trial",
+        "hwid": "",
+        "duration_hours": duration_hours,
+        "start_time": None,
+        "expires_at": None,
+        "activated_at": None
+    }
 
-        else:
-            return jsonify({"msg": "❌ Invalid Key Type"}), 403
+    TRIAL_USERS[trial_user] = {
+        "password": trial_pass,
+        "linked_license": trial_license
+    }
 
-    except Exception as e:
-        return jsonify({"msg": f"Server Error: {str(e)}"}), 500
-
-
-# --------------------------
-# 2. VERIFY LICENSE (EVERY LAUNCH)
-# --------------------------
-@app.route('/api/verify-license', methods=['POST'])
-def verify_license():
-    try:
-        data = request.get_json()
-        hwid = data.get('hwid', '').strip()
-        key_hash = data.get('hash', '').strip()
-
-        if not hwid or not key_hash:
-            return jsonify({"msg": "Invalid data"}), 400
-
-        # Check every key
-        for key, info in LICENSES.items():
-            # ✅ Unlimited key
-            if info["type"] == "unlimited":
-                if hwid in info["hwid"] and hashlib.sha256(key.encode()).hexdigest() == key_hash:
-                    return jsonify({"status": "ok"}), 200
-            # ✅ Single PC key
-            elif info["type"] == "single":
-                if info["hwid"] == hwid and hashlib.sha256(key.encode()).hexdigest() == key_hash:
-                    return jsonify({"status": "ok"}), 200
-
-        return jsonify({"msg": "❌ License Revoked or Invalid"}), 403
-
-    except Exception as e:
-        return jsonify({"msg": f"Server Error: {str(e)}"}), 500
-
-
-# --------------------------
-# 3. VALIDATE USERNAME
-# --------------------------
-@app.route('/api/validate-user', methods=['POST'])
-def validate_user():
-    try:
-        data = request.get_json()
-        username = data.get('username', '').strip()
-
-        if username in VALID_USERS:
-            return jsonify({"status": "ok"}), 200
-        else:
-            return jsonify({"msg": "❌ User Not Found"}), 404
-
-    except Exception as e:
-        return jsonify({"msg": "Server Error"}), 500
-
-
-# --------------------------
-# 4. CHECK PASSWORD
-# --------------------------
-@app.route('/api/check-password', methods=['POST'])
-def check_password():
-    try:
-        data = request.get_json()
-        username = data.get('username', '').strip()
-        password = data.get('password', '').strip()
-
-        if username in VALID_USERS and VALID_USERS[username] == password:
-            return jsonify({"status": "ok"}), 200
-        else:
-            return jsonify({"msg": "❌ Wrong Password"}), 403
-
-    except Exception as e:
-        return jsonify({"msg": "Server Error"}), 500
-
-
-# --------------------------
-# 5. CHECK UPDATE
-# --------------------------
-@app.route('/api/check-update', methods=['GET'])
-def check_update():
     return jsonify({
-        "update_available": False,
-        "latest_version": "BETA v7",
-        "download_url": ""
+        "trial_license": trial_license,
+        "trial_username": trial_user,
+        "trial_password": trial_pass,
+        "duration_hours": duration_hours
     }), 200
 
+# 📊 GET ALL TRIALS
+@app.route('/api/admin/get-all-trials', methods=['POST'])
+def get_all_trials():
+    data = request.get_json()
+    if not data or data.get("admin_key") != ADMIN_KEY:
+        return jsonify({"status":"denied"}), 403
 
-# ==============================================
-# ✅ RUN SERVER
-# ==============================================
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    trials_list = []
+    now = datetime.utcnow()
+
+    for lic_key, lic_data in TRIAL_LICENSES.items():
+        status = "NOT ACTIVATED"
+        remaining = "-"
+        if lic_data["start_time"]:
+            if lic_data["expires_at"] > now:
+                status = "✅ ACTIVE"
+                rem = lic_data["expires_at"] - now
+                remaining = f"{rem.days}d {rem.seconds//3600}h {(rem.seconds//60)%60}m"
+            else:
+                status = "❌ EXPIRED"
+                remaining = "EXPIRED"
+
+        trials_list.append({
+            "license_key": lic_key,
+            "duration_hours": lic_data["duration_hours"],
+            "hwid": lic_data["hwid"] if lic_data["hwid"] else "-",
+            "activated_at": lic_data["activated_at"].strftime('%Y-%m-%d %H:%M UTC') if lic_data["activated_at"] else "-",
+            "expires_at": lic_data["expires_at"].strftime('%Y-%m-%d %H:%M UTC') if lic_data["expires_at"] else "-",
+            "status": status,
+            "remaining": remaining
+        })
+
+    return jsonify({"trials": trials_list}), 200
+
+# 🗑️ DELETE TRIAL
+@app.route('/api/admin/delete-trial', methods=['POST'])
+def delete_trial():
+    data = request.get_json()
+    if not data or data.get("admin_key") != ADMIN_KEY:
+        return jsonify({"status":"denied"}), 403
+
+    lic_key = data.get("license_key","")
+    if lic_key in TRIAL_LICENSES:
+        for user, udata in list(TRIAL_USERS.items()):
+            if udata["linked_license"] == lic_key:
+                del TRIAL_USERS[user]
+        del TRIAL_LICENSES[lic_key]
+        return jsonify({"status":"deleted"}), 200
+
+    return jsonify({"status":"not_found"}), 404
+
+# 🚀 ACTIVATE LICENSE
+@app.route('/api/activate', methods=['POST'])
+def activate():
+    data = request.get_json()
+    key = data.get("license_key", "").strip()
+    hwid = data.get("hardware_id", "").strip()
+    now = datetime.utcnow()
+
+    if key in LICENSES:
+        lic = LICENSES[key]
+        if lic["type"] == "unlimited":
+            if hwid not in lic["hwid"]:
+                lic["hwid"].append(hwid)
+            return jsonify({"status":"activated"}), 200
+        if lic["type"] == "single":
+            if lic["hwid"] == "":
+                lic["hwid"] = hwid
+                return jsonify({"status":"activated"}), 200
+            elif lic["hwid"] == hwid:
+                return jsonify({"status":"activated"}), 200
+            else:
+                return jsonify({"status":"blocked","msg":"Used on another PC"}), 403
+
+    if key in TRIAL_LICENSES:
+        lic = TRIAL_LICENSES[key]
+        if lic["start_time"] is None:
+            lic["start_time"] = now
+            lic["activated_at"] = now
+            lic["expires_at"] = now + timedelta(hours=lic["duration_hours"])
+            lic["hwid"] = hwid
+            return jsonify({"status":"activated","msg":f"Trial active! Expires in {lic['duration_hours']}h"}), 200
+        if lic["expires_at"] and now > lic["expires_at"]:
+            return jsonify({"status":"expired","msg":"Trial expired"}), 403
+        if lic["hwid"] == hwid:
+            return jsonify({"status":"activated"}), 200
+        else:
+            return jsonify({"status":"blocked","msg":"Trial used on another PC"}), 403
+
+    return jsonify({"status":"invalid"}), 403
+
+# ✅ VERIFY LICENSE
+@app.route('/api/verify-license', methods=['POST'])
+def verify():
+    data = request.get_json()
+    hwid = data.get("hwid", "")
+    key_hash = data.get("hash", "")
+    now = datetime.utcnow()
+
+    for key, lic in LICENSES.items():
+        if hashlib.sha256(key.encode()).hexdigest() == key_hash:
+            if lic["type"]=="unlimited" and hwid in lic["hwid"]:
+                return jsonify({"ok":True}), 200
+            if lic["type"]=="single" and lic["hwid"]==hwid:
+                return jsonify({"ok":True}), 200
+
+    for key, lic in TRIAL_LICENSES.items():
+        if hashlib.sha256(key.encode()).hexdigest() == key_hash:
+            if lic["hwid"]==hwid and lic["expires_at"] and now < lic["expires_at"]:
+                return jsonify({"ok":True}), 200
+            if lic["expires_at"] and now > lic["expires_at"]:
+                return jsonify({"expired":True}), 403
+
+    return jsonify({"invalid":True}), 403
+
+# 🔑 LOGIN
+@app.route('/api/validate-user', methods=['POST'])
+def validate_user():
+    u = request.get_json().get("username","")
+    if u in VALID_USERS or u in TRIAL_USERS:
+        return jsonify({"ok":True}), 200
+    return "", 403
+
+@app.route('/api/check-password', methods=['POST'])
+def check_pass():
+    d = request.get_json()
+    u = d.get("username","")
+    p = d.get("password","")
+    if (u in VALID_USERS and VALID_USERS[u]==p) or (u in TRIAL_USERS and TRIAL_USERS[u]["password"]==p):
+        return jsonify({"ok":True}), 200
+    return "", 403
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
