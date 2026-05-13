@@ -15,7 +15,7 @@ DATA_FILE = "server_data.json"
 # ==================================================
 LICENSES = {
     # 🔓 PERMANENT KEYS
-    "JEPFX-2026-SECRET": {
+    "JEPFX-2026": {
         "type": "unlimited",
         "hwid": [],
         "expires_at": None
@@ -30,7 +30,8 @@ LICENSES = {
 VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
     "SEAN": "SEAN_0",
-    "N4XCO": "N4XCO_0"
+    "N4XCO": "N4XCO_0",
+    "RHYZ": "RHYZ_0"
 }
 
 # Trial data storage - loaded from file on startup
