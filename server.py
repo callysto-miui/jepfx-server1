@@ -2,15 +2,18 @@ from flask import Flask, request, jsonify
 import hashlib
 from datetime import datetime, timedelta
 import uuid
+import json
+import os
 
 app = Flask(__name__)
+DATA_FILE = "server_data.json"
 
 # ==================================================
 # 📝 LICENSES & USERS — EDIT HERE
 # ==================================================
 LICENSES = {
     # 🔓 PERMANENT KEYS
-    "JEPFX-2026": {
+    "JEPFX-2026-SECRET": {
         "type": "unlimited",
         "hwid": [],
         "expires_at": None
@@ -25,16 +28,40 @@ LICENSES = {
 VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
     "SEAN": "SEAN_0",
-    "N4XCO": "N4XCO_0",
-    "RHYZ": "RHYZ_0"
+    "N4XCO": "N4XCO_0"
 }
 
-# 🆕 TRIAL DATA STORAGE
+# 🆕 Load saved data from file OR create new if file doesn't exist
 TRIAL_LICENSES = {}
 TRIAL_USERS = {}
 
+def load_data():
+    global TRIAL_LICENSES, TRIAL_USERS
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r") as f:
+                data = json.load(f)
+                TRIAL_LICENSES = data.get("trials", {})
+                TRIAL_USERS = data.get("users", {})
+        except:
+            TRIAL_LICENSES = {}
+            TRIAL_USERS = {}
+    else:
+        save_data()
+
+def save_data():
+    data = {
+        "trials": TRIAL_LICENSES,
+        "users": TRIAL_USERS
+    }
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
 # 🔑 ADMIN KEY — **EXACT SAME IN BOTH FILES**
 ADMIN_KEY = "JEPFX-ADMIN-2026"
+
+# Load data when server starts
+load_data()
 
 # ==================================================
 # 🚀 ROUTES
@@ -51,7 +78,6 @@ def generate_trial():
         return jsonify({"status":"denied"}), 403
 
     duration_hours = int(data.get("duration_hours", 3))
-
     trial_license = f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
     trial_user = f"TRIAL-{uuid.uuid4().hex[:6].upper()}"
     trial_pass = uuid.uuid4().hex[:10].upper()
@@ -70,6 +96,7 @@ def generate_trial():
         "linked_license": trial_license
     }
 
+    save_data()  # Save to file immediately
     return jsonify({
         "trial_license": trial_license,
         "trial_username": trial_user,
@@ -87,10 +114,13 @@ def get_all_trials():
     trials_list = []
     now = datetime.utcnow()
 
-    for lic_key, lic_data in TRIAL_LICENSES.items():
+    # Check expiry every time data is loaded, so even after server restart status is correct
+    for lic_key, lic_data in list(TRIAL_LICENSES.items()):
         status = "NOT ACTIVATED"
         remaining = "-"
-        if lic_data["start_time"]:
+
+        # If trial was activated, check if still active
+        if lic_data["start_time"] and lic_data["expires_at"]:
             if lic_data["expires_at"] > now:
                 status = "✅ ACTIVE"
                 rem = lic_data["expires_at"] - now
@@ -98,6 +128,9 @@ def get_all_trials():
             else:
                 status = "❌ EXPIRED"
                 remaining = "EXPIRED"
+        else:
+            status = "NOT ACTIVATED"
+            remaining = "-"
 
         trials_list.append({
             "license_key": lic_key,
@@ -124,8 +157,8 @@ def delete_trial():
             if udata["linked_license"] == lic_key:
                 del TRIAL_USERS[user]
         del TRIAL_LICENSES[lic_key]
+        save_data()  # Save changes
         return jsonify({"status":"deleted"}), 200
-
     return jsonify({"status":"not_found"}), 404
 
 # 🚀 ACTIVATE LICENSE
@@ -141,7 +174,7 @@ def activate():
         if lic["type"] == "unlimited":
             if hwid not in lic["hwid"]:
                 lic["hwid"].append(hwid)
-            return jsonify({"status":"activated"}), 200
+                return jsonify({"status":"activated"}), 200
         if lic["type"] == "single":
             if lic["hwid"] == "":
                 lic["hwid"] = hwid
@@ -158,13 +191,16 @@ def activate():
             lic["activated_at"] = now
             lic["expires_at"] = now + timedelta(hours=lic["duration_hours"])
             lic["hwid"] = hwid
+            save_data()  # Save changes
             return jsonify({"status":"activated","msg":f"Trial active! Expires in {lic['duration_hours']}h"}), 200
-        if lic["expires_at"] and now > lic["expires_at"]:
-            return jsonify({"status":"expired","msg":"Trial expired"}), 403
-        if lic["hwid"] == hwid:
-            return jsonify({"status":"activated"}), 200
         else:
-            return jsonify({"status":"blocked","msg":"Trial used on another PC"}), 403
+            # Check if trial already expired
+            if lic["expires_at"] and now > lic["expires_at"]:
+                return jsonify({"status":"expired","msg":"Trial expired"}), 403
+            if lic["hwid"] == hwid:
+                return jsonify({"status":"activated"}), 200
+            else:
+                return jsonify({"status":"blocked","msg":"Trial used on another PC"}), 403
 
     return jsonify({"status":"invalid"}), 403
 
@@ -189,6 +225,7 @@ def verify():
                 return jsonify({"ok":True}), 200
             if lic["expires_at"] and now > lic["expires_at"]:
                 return jsonify({"expired":True}), 403
+            return jsonify({"invalid":True}), 403
 
     return jsonify({"invalid":True}), 403
 
