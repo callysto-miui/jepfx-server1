@@ -14,7 +14,7 @@ DATA_FILE = "server_data.json"
 # 📝 LICENSES & USERS - EDIT THESE AS NEEDED
 # ==================================================
 LICENSES = {
-    "JEPFX-2026-SECRET": {
+    "JEPFX-2026": {
         "type": "unlimited",
         "hwid": [],
         "expires_at": None
@@ -30,6 +30,7 @@ VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
     "SEAN": "SEAN_0",
     "N4XCO": "N4XCO_0"
+    "RHYZ"l "RHYZ_0"
 }
 
 TRIAL_LICENSES = {}
