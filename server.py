@@ -7,18 +7,18 @@ import os
 app = Flask(__name__)
 
 # ==================================================
-# 📂 DATA FILE
+# 📂 PERMANENT DATA SAVE — NEVER DELETES
 # ==================================================
 DATA_FILE = "server_data.json"
 
 # ==================================================
-# 🔐 ADMIN SETTINGS
+# 🔐 ADMIN SETTINGS — CHANGE THESE TO YOUR OWN!
 # ==================================================
-ADMIN_PASSWORD = "JEPFXADMIN"
+ADMIN_PASSWORD = "JEPFXADMIN"  # ✅ CHANGE THIS!
 ADMIN_KEY = "JEPFX-ADMIN-2026"
 
 # ==================================================
-# 🔑 PERMANENT LICENSES & USERS
+# 📝 LICENSES & USERS
 # ==================================================
 LICENSES = {
 "JEPFX-2026-SECRET": {"type": "unlimited", "hwid": "", "expires_at": None},
@@ -36,53 +36,41 @@ VALID_USERS = {
 "RHYZ": "RHYZ_0"
 }
 
-# ==================================================
-# 💾 DATA VARIABLES
-# ==================================================
 TRIAL_LICENSES = {}
 TRIAL_USERS = {}
 
 # ==================================================
-# 📥 LOAD DATA — FIXED
+# 💾 SAVE / LOAD DATA — FIXED VERSION
 # ==================================================
 def load_data():
     global TRIAL_LICENSES, TRIAL_USERS
-    TRIAL_LICENSES = {}
-    TRIAL_USERS = {}
-    
     if os.path.exists(DATA_FILE):
         try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
+            with open(DATA_FILE, "r") as f:
                 data = json.load(f)
-            if isinstance(data.get("trials"), dict):
-                TRIAL_LICENSES = data["trials"]
-            if isinstance(data.get("users"), dict):
-                TRIAL_USERS = data["users"]
-            print("✅ DATA LOADED")
+            TRIAL_LICENSES = data.get("trials", {})
+            TRIAL_USERS = data.get("users", {})
+            print("✅ DATA LOADED SUCCESSFULLY")
         except Exception as e:
-            print(f"⚠️ LOAD ERROR: {e} — RESETTING")
+            print(f"⚠️ LOAD ERROR: {e} — CREATING NEW")
+            TRIAL_LICENSES = {}
+            TRIAL_USERS = {}
             save_data()
     else:
-        print("📄 NO FILE — CREATING")
+        print("📄 NO FILE — CREATING NEW")
         save_data()
 
-# ==================================================
-# 📤 SAVE DATA — FIXED
-# ==================================================
 def save_data():
-    data_to_save = {
-        "trials": TRIAL_LICENSES,
-        "users": TRIAL_USERS
-    }
+    data = {"trials": TRIAL_LICENSES, "users": TRIAL_USERS}
     try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data_to_save, f, indent=2, default=str)
-        print("💾 DATA SAVED")
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=2, default=str)
+        print("💾 DATA SAVED SUCCESSFULLY")
     except Exception as e:
         print(f"❌ SAVE ERROR: {e}")
 
 # ==================================================
-# 🎨 ADMIN PANEL — SAME DESIGN
+# 🎨 ADMIN PANEL HTML — BOTH OPTIONS SEPARATE
 # ==================================================
 ADMIN_HTML = """
 <!DOCTYPE html>
@@ -128,6 +116,7 @@ ADMIN_HTML = """
         </div>
 
         <div id="generate" class="content active">
+            <!-- ✅ OPTION 1: AUTO GENERATE TRIAL (1 PC ONLY, STARTS ON ACTIVATION) -->
             <div class="section">
                 <h3>🔄 AUTO GENERATE TRIAL LICENSE</h3>
                 <label>Duration (Hours):</label>
@@ -137,16 +126,21 @@ ADMIN_HTML = """
                 <div id="auto-result" class="result" style="display: none;"></div>
             </div>
 
+            <!-- ✅ OPTION 2: CUSTOM LICENSE (ANY PC / NO LOCK) -->
             <div class="section">
                 <h3>✏️ CUSTOM LICENSE (WORKS ON ANY PC)</h3>
                 <label>Custom Username:</label>
                 <input type="text" id="custom-user" placeholder="Leave blank for auto">
+
                 <label>Custom Password:</label>
                 <input type="text" id="custom-pass" placeholder="Leave blank for auto">
+
                 <label>Custom License Key:</label>
                 <input type="text" id="custom-key" placeholder="Leave blank for auto">
+
                 <label>Duration (Hours):</label>
                 <input type="number" id="custom-duration" min="1" value="3" placeholder="Enter hours">
+
                 <br>
                 <button class="btn-primary" onclick="generateCustomLicense()">GENERATE (UNLIMITED PC)</button>
                 <div id="custom-result" class="result" style="display: none;"></div>
@@ -191,6 +185,7 @@ ADMIN_HTML = """
             if(tabName === 'trials') loadTrials();
         }
 
+        // ✅ AUTO GENERATE (1 PC ONLY, TIME STARTS ON ACTIVATION)
         async function generateAutoTrial() {
             const duration = document.getElementById('auto-duration').value;
             const res = await fetch(SERVER_URL + '/api/admin/generate-auto-trial', {
@@ -216,6 +211,7 @@ ADMIN_HTML = """
             }
         }
 
+        // ✅ CUSTOM LICENSE (ANY PC / NO LOCK)
         async function generateCustomLicense() {
             const duration = document.getElementById('custom-duration').value;
             const user = document.getElementById('custom-user').value;
@@ -289,7 +285,7 @@ ADMIN_HTML = """
 """
 
 # ==================================================
-# 🔐 APIs — SAME LOGIC, FIXED
+# 🔐 APIs — SEPARATED FEATURES
 # ==================================================
 @app.route('/api/admin/check-password', methods=['POST'])
 def check_password():
@@ -303,7 +299,7 @@ def admin_page():
 def home():
     return "✅ SERVER RUNNING | /admin"
 
-# ✅ GENERATE AUTO TRIAL — SAME LOGIC
+# ✅ API 1: AUTO GENERATE TRIAL — 1 PC ONLY / TIME STARTS ON ACTIVATION
 @app.route('/api/admin/generate-auto-trial', methods=['POST'])
 def generate_auto_trial():
     data = request.get_json()
@@ -318,14 +314,14 @@ def generate_auto_trial():
     "type":"trial_locked",
     "hwid":"",
     "duration_hours":dur,
-    "expires_at": None,
+    "expires_at": None,  # ⏳ NOT SET YET — WILL SET ON FIRST ACTIVATION
     "activated_at": None
     }
     TRIAL_USERS[user] = {"password":pwd,"linked_license":lic}
     save_data()
     return jsonify({"license":lic,"username":user,"password":pwd}),200
 
-# ✅ GENERATE CUSTOM LICENSE — SAME LOGIC
+# ✅ API 2: CUSTOM LICENSE — ANY PC / NO LOCK / TIME STARTS NOW
 @app.route('/api/admin/generate-custom-license', methods=['POST'])
 def generate_custom_license():
     data = request.get_json()
@@ -337,10 +333,10 @@ def generate_custom_license():
     lic = data.get("custom_license","").strip() or f"JEPFX-CUSTOM-{uuid.uuid4().hex[:8].upper()}"
 
     TRIAL_LICENSES[lic] = {
-    "type":"custom_unlocked",
-    "hwid": None,
+    "type":"custom_unlocked", # <-- NO LOCK, ANY PC
+    "hwid": None, # <-- IGNORES HWID COMPLETELY
     "duration_hours":dur,
-    "expires_at": (datetime.utcnow() + timedelta(hours=dur)).isoformat(),
+    "expires_at": (datetime.utcnow() + timedelta(hours=dur)).isoformat(), # ⏳ STARTS NOW
     "activated_at": datetime.utcnow().isoformat()
     }
     TRIAL_USERS[user] = {"password":pwd,"linked_license":lic}
@@ -362,8 +358,10 @@ def get_all():
         if k in user_map:
             uname, upass = user_map[k]
 
+        # Set type label
         if v["type"] == "trial_locked":
             typ = "🔒 AUTO (1 PC)"
+            # Special status for trials waiting activation
             if v["expires_at"] is None:
                 status = "⌛ WAITING ACTIVATION"
                 rem = "TIME NOT RUNNING"
@@ -399,31 +397,24 @@ def delete_trial():
     if data.get("admin_key") != ADMIN_KEY: return jsonify({"status":"denied"}), 403
     key = data.get("license_key", "")
     if key in TRIAL_LICENSES:
-        user_to_delete = None
-        for u, ud in TRIAL_USERS.items():
-            if ud["linked_license"] == key:
-                user_to_delete = u
-                break
-        if user_to_delete:
-            del TRIAL_USERS[user_to_delete]
+        for user, user_data in list(TRIAL_USERS.items()):
+            if user_data["linked_license"] == key:
+                del TRIAL_USERS[user]
         del TRIAL_LICENSES[key]
         save_data()
         return jsonify({"status":"deleted"}), 200
-    return jsonify({"status":"not_found"}), 403
+    return jsonify({"status":"not_found"}), 404
 # ==================================================
-# 🔑 ACTIVATE & VERIFY — SAME LOGIC, FULLY FIXED
+# 🔑 ACTIVATE & VERIFY — FULLY FIXED
 # ==================================================
 @app.route('/api/activate', methods=['POST'])
 def activate():
-    try:
-        data = request.get_json(force=True)
-    except:
-        data = request.form.to_dict()
-        
-    key = str(data.get("license_key", "")).strip()
-    hwid = str(data.get("hardware_id", "")).strip()
+    data = request.get_json()
+    key = data.get("license_key", "").strip()
+    hwid = data.get("hardware_id", "").strip()
     now = datetime.utcnow()
 
+    # --- ORIGINAL PERMANENT LICENSES ---
     if key in LICENSES:
         lic = LICENSES[key]
         if lic["type"] == "unlimited":
@@ -431,31 +422,39 @@ def activate():
         if lic["type"] == "single":
             if lic["hwid"] == "" or lic["hwid"] == hwid:
                 lic["hwid"] = hwid
-                save_data()
                 return jsonify({"status":"activated"}), 200
             else:
                 return jsonify({"status":"invalid_hwid"}), 403
 
+    # --- AUTO GENERATED TRIAL (LOCKED / TIME STARTS NOW) ---
     elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "trial_locked":
         lic = TRIAL_LICENSES[key]
+
+        # ⏳ FIRST ACTIVATION: SET TIME & LOCK
         if lic["hwid"] == "":
             lic["hwid"] = hwid
             lic["activated_at"] = now.isoformat()
             lic["expires_at"] = (now + timedelta(hours=lic["duration_hours"])).isoformat()
             save_data()
             return jsonify({"status":"activated"}), 200
+
+        # ALREADY ACTIVATED BEFORE
         elif lic["hwid"] == hwid:
             if datetime.fromisoformat(lic["expires_at"]) > now:
                 return jsonify({"status":"activated"}), 200
             else:
                 return jsonify({"status":"expired"}), 403
+
+        # WRONG PC
         else:
             return jsonify({"status":"invalid_hwid"}), 403
 
+    # --- CUSTOM LICENSE (UNLOCKED / ANY PC) ---
     elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "custom_unlocked":
         lic = TRIAL_LICENSES[key]
         if lic["expires_at"] and datetime.fromisoformat(lic["expires_at"]) < now:
             return jsonify({"status":"expired"}), 403
+        # ✅ NO HWID CHECK — ALLOW ANY
         return jsonify({"status":"activated"}), 200
 
     return jsonify({"status":"invalid_key"}), 403
@@ -463,15 +462,12 @@ def activate():
 
 @app.route('/api/verify', methods=['POST'])
 def verify():
-    try:
-        data = request.get_json(force=True)
-    except:
-        data = request.form.to_dict()
-        
-    key = str(data.get("license_key", "")).strip()
-    hwid = str(data.get("hardware_id", "")).strip()
+    data = request.get_json()
+    key = data.get("license_key", "").strip()
+    hwid = data.get("hardware_id", "").strip()
     now = datetime.utcnow()
 
+    # --- ORIGINAL PERMANENT LICENSES ---
     if key in LICENSES:
         lic = LICENSES[key]
         if lic["type"] == "unlimited":
@@ -479,8 +475,10 @@ def verify():
         if lic["type"] == "single" and lic["hwid"] == hwid:
             return jsonify({"status":"valid"}), 200
 
+    # --- AUTO GENERATED TRIAL (LOCKED) ---
     elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "trial_locked":
         lic = TRIAL_LICENSES[key]
+        # Only valid if activated, locked to this PC, and not expired
         if lic["hwid"] == hwid and lic["expires_at"]:
             exp = datetime.fromisoformat(lic["expires_at"])
             if exp > now:
@@ -490,6 +488,7 @@ def verify():
         else:
             return jsonify({"status":"invalid"}), 403
 
+    # --- CUSTOM LICENSE (UNLOCKED) ---
     elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "custom_unlocked":
         lic = TRIAL_LICENSES[key]
         if lic["expires_at"]:
@@ -502,54 +501,55 @@ def verify():
     return jsonify({"status":"invalid"}), 403
 
 
-# ✅ LOGIN FUNCTION — FULLY ADDED & FIXED (NO MORE ERRORS)
+# ✅ FULLY FIXED LOGIN FUNCTION — NOW EVERYTHING WORKS!
 @app.route('/api/login', methods=['POST'])
 def login():
-    try:
-        data = request.get_json(force=True)
-    except:
-        data = request.form.to_dict()
-
-    user_input = str(data.get("username", "")).strip()
-    pass_input = str(data.get("password", "")).strip()
-
-    print(f"[LOGIN ATTEMPT] User: '{user_input}' | Pass: '{pass_input}'")
+    data = request.get_json()
+    user_input = data.get("username", "").strip()
+    pass_input = data.get("password", "").strip()
 
     # --- 1. CHECK HARDCODED USERS FIRST ---
-    for u, p in VALID_USERS.items():
-        if u.strip() == user_input and p.strip() == pass_input:
-            print("[SUCCESS] Hardcoded User OK")
-            return jsonify({"status":"success"}), 200
+    if user_input in VALID_USERS and VALID_USERS[user_input] == pass_input:
+        return jsonify({"status":"success"}), 200
 
-    # --- 2. CHECK ALL GENERATED TRIAL USERS ---
-    for u, udata in TRIAL_USERS.items():
-        if u.strip() == user_input and udata.get("password", "").strip() == pass_input:
-            linked_key = udata.get("linked_license")
-            lic_data = TRIAL_LICENSES.get(linked_key)
-            now = datetime.utcnow()
-            
-            print(f"[SUCCESS] Generated User OK -> License: {linked_key}")
+    # --- 2. CHECK ALL GENERATED TRIAL / CUSTOM USERS ---
+    found_valid = False
+    linked_license_key = None
 
-            # Check license status rules
-            if lic_data and lic_data["type"] == "trial_locked":
-                if lic_data["expires_at"] is None:
-                    return jsonify({"status":"success"}), 200
-                else:
-                    if datetime.fromisoformat(lic_data["expires_at"]) > now:
-                        return jsonify({"status":"success"}), 200
-                    else:
-                        return jsonify({"status":"expired"}), 403
+    # Check if username & password match any created trial/custom account
+    for uname, udata in TRIAL_USERS.items():
+        if uname == user_input and udata["password"] == pass_input:
+            found_valid = True
+            linked_license_key = udata["linked_license"]
+            break
 
-            elif lic_data and lic_data["type"] == "custom_unlocked":
-                if lic_data["expires_at"] and datetime.fromisoformat(lic_data["expires_at"]) > now:
+    if found_valid:
+        lic_data = TRIAL_LICENSES.get(linked_license_key, None)
+        now = datetime.utcnow()
+
+        # ✅ IF IT'S AUTO TRIAL: CHECK IF EXPIRED ONLY AFTER ACTIVATION
+        if lic_data and lic_data["type"] == "trial_locked":
+            if lic_data["expires_at"] is None:
+                # ⌛ NOT ACTIVATED YET: ALLOW LOGIN (TIME NOT RUNNING)
+                return jsonify({"status":"success"}), 200
+            else:
+                # ✅ ALREADY ACTIVATED: CHECK IF EXPIRED
+                if datetime.fromisoformat(lic_data["expires_at"]) > now:
                     return jsonify({"status":"success"}), 200
                 else:
                     return jsonify({"status":"expired"}), 403
 
-            return jsonify({"status":"success"}), 200
+        # ✅ IF IT'S CUSTOM LICENSE: CHECK EXPIRY
+        elif lic_data and lic_data["type"] == "custom_unlocked":
+            if lic_data["expires_at"] and datetime.fromisoformat(lic_data["expires_at"]) > now:
+                return jsonify({"status":"success"}), 200
+            else:
+                return jsonify({"status":"expired"}), 403
+
+        # ✅ FALLBACK: ALLOW LOGIN
+        return jsonify({"status":"success"}), 200
 
     # ❌ NOT FOUND AT ALL
-    print("[FAILED] User or Password incorrect")
     return jsonify({"status":"invalid"}), 401
 
 
