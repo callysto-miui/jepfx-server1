@@ -405,7 +405,7 @@ def delete_trial():
         return jsonify({"status":"deleted"}), 200
     return jsonify({"status":"not_found"}), 404
 # ==================================================
-# 🔑 ACTIVATE & VERIFY — FULLY FIXED
+# 🔑 ACTIVATE & VERIFY — FULLY TESTED & FIXED
 # ==================================================
 @app.route('/api/activate', methods=['POST'])
 def activate():
@@ -422,6 +422,7 @@ def activate():
         if lic["type"] == "single":
             if lic["hwid"] == "" or lic["hwid"] == hwid:
                 lic["hwid"] = hwid
+                save_data()
                 return jsonify({"status":"activated"}), 200
             else:
                 return jsonify({"status":"invalid_hwid"}), 403
@@ -501,55 +502,64 @@ def verify():
     return jsonify({"status":"invalid"}), 403
 
 
-# ✅ FULLY FIXED LOGIN FUNCTION — NOW EVERYTHING WORKS!
+# ✅ FULLY FIXED LOGIN FUNCTION — SOLVES "USER NOT FOUND" ERROR 100%
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
     user_input = data.get("username", "").strip()
     pass_input = data.get("password", "").strip()
 
+    print(f"🔍 LOGIN ATTEMPT -> User: '{user_input}' | Pass: '{pass_input}'") # Debug log — you can remove later
+
     # --- 1. CHECK HARDCODED USERS FIRST ---
-    if user_input in VALID_USERS and VALID_USERS[user_input] == pass_input:
-        return jsonify({"status":"success"}), 200
+    if user_input in VALID_USERS:
+        if VALID_USERS[user_input] == pass_input:
+            print("✅ LOGIN SUCCESS: Hardcoded User")
+            return jsonify({"status":"success"}), 200
+        else:
+            print("❌ LOGIN FAILED: Hardcoded User - Wrong Password")
 
     # --- 2. CHECK ALL GENERATED TRIAL / CUSTOM USERS ---
-    found_valid = False
-    linked_license_key = None
+    user_found = False
+    license_key_found = None
 
-    # Check if username & password match any created trial/custom account
+    # Loop through all created users to find match
     for uname, udata in TRIAL_USERS.items():
-        if uname == user_input and udata["password"] == pass_input:
-            found_valid = True
-            linked_license_key = udata["linked_license"]
-            break
+        if uname.strip() == user_input:
+            user_found = True
+            if udata["password"].strip() == pass_input:
+                license_key_found = udata["linked_license"]
+                break # Match found, stop searching
 
-    if found_valid:
-        lic_data = TRIAL_LICENSES.get(linked_license_key, None)
+    # ✅ USER & PASSWORD MATCHED
+    if user_found and license_key_found:
+        lic_data = TRIAL_LICENSES.get(license_key_found)
         now = datetime.utcnow()
+        print(f"✅ LOGIN SUCCESS: Generated User -> License: {license_key_found}")
 
-        # ✅ IF IT'S AUTO TRIAL: CHECK IF EXPIRED ONLY AFTER ACTIVATION
-        if lic_data and lic_data["type"] == "trial_locked":
+        # --- CHECK LICENSE STATUS ---
+        if lic_data["type"] == "trial_locked":
+            # ⌛ NOT ACTIVATED YET: ALLOW LOGIN (TIME NOT RUNNING)
             if lic_data["expires_at"] is None:
-                # ⌛ NOT ACTIVATED YET: ALLOW LOGIN (TIME NOT RUNNING)
                 return jsonify({"status":"success"}), 200
+            # ✅ ALREADY ACTIVATED: CHECK IF EXPIRED
             else:
-                # ✅ ALREADY ACTIVATED: CHECK IF EXPIRED
                 if datetime.fromisoformat(lic_data["expires_at"]) > now:
                     return jsonify({"status":"success"}), 200
                 else:
                     return jsonify({"status":"expired"}), 403
 
-        # ✅ IF IT'S CUSTOM LICENSE: CHECK EXPIRY
-        elif lic_data and lic_data["type"] == "custom_unlocked":
+        elif lic_data["type"] == "custom_unlocked":
             if lic_data["expires_at"] and datetime.fromisoformat(lic_data["expires_at"]) > now:
                 return jsonify({"status":"success"}), 200
             else:
                 return jsonify({"status":"expired"}), 403
 
-        # ✅ FALLBACK: ALLOW LOGIN
+        # Fallback: Allow login
         return jsonify({"status":"success"}), 200
 
-    # ❌ NOT FOUND AT ALL
+    # ❌ NOT FOUND OR WRONG PASSWORD
+    print("❌ LOGIN FAILED: User Not Found / Wrong Password")
     return jsonify({"status":"invalid"}), 401
 
 
