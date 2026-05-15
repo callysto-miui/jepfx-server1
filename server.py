@@ -72,7 +72,7 @@ def save_data():
         load_data()
 
 # ==================================================
-# 🎨 ADMIN PANEL HTML — UPDATED WITH CUSTOM FIELDS
+# 🎨 ADMIN PANEL HTML — BOTH OPTIONS SEPARATE
 # ==================================================
 ADMIN_HTML = """
 <!DOCTYPE html>
@@ -98,6 +98,7 @@ ADMIN_HTML = """
         th, td { padding: 12px; text-align: center; border-bottom: 1px solid #3a2b70; }
         th { background: #3a2b70; }
         .result { background: #241854; padding: 20px; border-radius: 5px; margin-top: 20px; white-space: pre-line; }
+        .section { border: 1px solid #7B61FF; padding: 15px; border-radius: 8px; margin: 15px 0; }
     </style>
 </head>
 <body>
@@ -112,34 +113,46 @@ ADMIN_HTML = """
     <div id="panel" class="panel-box">
         <h1>⚡ JEPFX ADMIN PANEL</h1>
         <div class="tabs">
-            <div class="tab active" onclick="showTab('generate')">GENERATE TRIAL</div>
-            <div class="tab" onclick="showTab('trials')">VIEW TRIALS</div>
+            <div class="tab active" onclick="showTab('generate')">GENERATE LICENSES</div>
+            <div class="tab" onclick="showTab('trials')">VIEW ALL</div>
         </div>
 
         <div id="generate" class="content active">
-            <h3>Create New Trial License</h3>
-            
-            <label>Custom Username:</label>
-            <input type="text" id="custom-user" placeholder="Leave blank for auto-generate">
+            <!-- ✅ OPTION 1: AUTO GENERATE TRIAL (1 PC ONLY) -->
+            <div class="section">
+                <h3>🔄 AUTO GENERATE TRIAL LICENSE</h3>
+                <label>Duration (Hours):</label>
+                <input type="number" id="auto-duration" min="1" value="3" placeholder="Enter hours">
+                <br>
+                <button class="btn-primary" onclick="generateAutoTrial()">GENERATE (1 PC ONLY)</button>
+                <div id="auto-result" class="result" style="display: none;"></div>
+            </div>
 
-            <label>Custom Password:</label>
-            <input type="text" id="custom-pass" placeholder="Leave blank for auto-generate">
+            <!-- ✅ OPTION 2: CUSTOM LICENSE (ANY PC / NO LOCK) -->
+            <div class="section">
+                <h3>✏️ CUSTOM LICENSE (WORKS ON ANY PC)</h3>
+                <label>Custom Username:</label>
+                <input type="text" id="custom-user" placeholder="Leave blank for auto">
 
-            <label>Custom License Key:</label>
-            <input type="text" id="custom-key" placeholder="Leave blank for auto-generate">
+                <label>Custom Password:</label>
+                <input type="text" id="custom-pass" placeholder="Leave blank for auto">
 
-            <label>Duration (Hours):</label>
-            <input type="number" id="duration" min="1" value="3" placeholder="Enter hours (168+ allowed)">
+                <label>Custom License Key:</label>
+                <input type="text" id="custom-key" placeholder="Leave blank for auto">
 
-            <br>
-            <button class="btn-primary" onclick="createTrial()">GENERATE LICENSE</button>
-            <div id="result" class="result" style="display: none;"></div>
+                <label>Duration (Hours):</label>
+                <input type="number" id="custom-duration" min="1" value="3" placeholder="Enter hours">
+
+                <br>
+                <button class="btn-primary" onclick="generateCustomLicense()">GENERATE (UNLIMITED PC)</button>
+                <div id="custom-result" class="result" style="display: none;"></div>
+            </div>
         </div>
         <div id="trials" class="content">
-            <h3>All Active Trials</h3>
+            <h3>All Licenses & Trials</h3>
             <button class="btn-primary" onclick="loadTrials()">REFRESH LIST</button>
             <table id="trials-table">
-                <tr><th>LICENSE KEY</th><th>USERNAME</th><th>PASSWORD</th><th>DURATION</th><th>STATUS</th><th>REMAINING</th><th>ACTION</th></tr>
+                <tr><th>TYPE</th><th>LICENSE KEY</th><th>USERNAME</th><th>PASSWORD</th><th>DURATION</th><th>STATUS</th><th>REMAINING</th><th>ACTION</th></tr>
             </table>
         </div>
     </div>
@@ -174,40 +187,63 @@ ADMIN_HTML = """
             if(tabName === 'trials') loadTrials();
         }
 
-        async function createTrial() {
-            const duration = document.getElementById('duration').value;
-            const customUser = document.getElementById('custom-user').value;
-            const customPass = document.getElementById('custom-pass').value;
-            const customKey = document.getElementById('custom-key').value;
+        // ✅ AUTO GENERATE (1 PC ONLY)
+        async function generateAutoTrial() {
+            const duration = document.getElementById('auto-duration').value;
+            const res = await fetch(SERVER_URL + '/api/admin/generate-auto-trial', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({admin_key: ADMIN_KEY, duration_hours: parseInt(duration)})
+            });
+            const data = await res.json();
+            document.getElementById('auto-result').style.display = 'block';
+            if(res.ok) {
+                document.getElementById('auto-result').innerHTML = `
+✅ AUTO TRIAL CREATED
+━━━━━━━━━━━━━━━━━━
+🔑 LICENSE: ${data.license}
+👤 USER: ${data.username}
+🔒 PASS: ${data.password}
+⏱️ TIME: ${duration} HOURS
+🔒 LOCKS TO 1ST PC ONLY
+━━━━━━━━━━━━━━━━━━
+                `;
+                loadTrials();
+            }
+        }
 
-            const res = await fetch(SERVER_URL + '/api/admin/generate-trial', {
+        // ✅ CUSTOM LICENSE (ANY PC / NO LOCK)
+        async function generateCustomLicense() {
+            const duration = document.getElementById('custom-duration').value;
+            const user = document.getElementById('custom-user').value;
+            const pass = document.getElementById('custom-pass').value;
+            const key = document.getElementById('custom-key').value;
+
+            const res = await fetch(SERVER_URL + '/api/admin/generate-custom-license', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     admin_key: ADMIN_KEY,
                     duration_hours: parseInt(duration),
-                    custom_username: customUser,
-                    custom_password: customPass,
-                    custom_license: customKey
+                    custom_username: user,
+                    custom_password: pass,
+                    custom_license: key
                 })
             });
-
             const data = await res.json();
-            document.getElementById('result').style.display = 'block';
+            document.getElementById('custom-result').style.display = 'block';
             if(res.ok) {
-                document.getElementById('result').innerHTML = `
-✅ TRIAL CREATED
+                document.getElementById('custom-result').innerHTML = `
+✅ CUSTOM LICENSE CREATED
 ━━━━━━━━━━━━━━━━━━
-🔑 LICENSE: ${data.trial_license}
-👤 USER: ${data.trial_username}
-🔒 PASS: ${data.trial_password}
-⏱️ TIME: ${data.duration_hours} HOURS
-♾️ WORKS ON ANY PC — NO LIMIT
+🔑 LICENSE: ${data.license}
+👤 USER: ${data.username}
+🔒 PASS: ${data.password}
+⏱️ TIME: ${duration} HOURS
+♾️ WORKS ON ANY PC
 ━━━━━━━━━━━━━━━━━━
                 `;
                 loadTrials();
-            } else {
-                document.getElementById('result').innerHTML = '❌ ERROR!';
             }
         }
 
@@ -219,11 +255,12 @@ ADMIN_HTML = """
             });
             const data = await res.json();
             const table = document.getElementById('trials-table');
-            table.innerHTML = `<tr><th>LICENSE KEY</th><th>USERNAME</th><th>PASSWORD</th><th>DURATION</th><th>STATUS</th><th>REMAINING</th><th>ACTION</th></tr>`;
+            table.innerHTML = `<tr><th>TYPE</th><th>LICENSE KEY</th><th>USERNAME</th><th>PASSWORD</th><th>DURATION</th><th>STATUS</th><th>REMAINING</th><th>ACTION</th></tr>`;
             
             data.trials.forEach(trial => {
                 const row = table.insertRow(-1);
                 row.innerHTML = `
+                    <td>${trial.type}</td>
                     <td>${trial.license_key}</td>
                     <td>${trial.username}</td>
                     <td>${trial.password}</td>
@@ -236,7 +273,7 @@ ADMIN_HTML = """
         }
 
         async function deleteTrial(key) {
-            if(!confirm('Delete this trial?')) return;
+            if(!confirm('Delete this license?')) return;
             await fetch(SERVER_URL + '/api/admin/delete-trial', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -249,7 +286,7 @@ ADMIN_HTML = """
 """
 
 # ==================================================
-# 🔐 APIs — UPDATED: CUSTOM LICENSES = NO HWID LOCK
+# 🔐 APIs — SEPARATED FEATURES
 # ==================================================
 @app.route('/api/admin/check-password', methods=['POST'])
 def check_password():
@@ -263,50 +300,70 @@ def admin_page():
 def home():
     return "✅ SERVER RUNNING | /admin"
 
-@app.route('/api/admin/generate-trial', methods=['POST'])
-def generate_trial():
+# ✅ API 1: AUTO GENERATE TRIAL — 1 PC ONLY / LOCKS HWID
+@app.route('/api/admin/generate-auto-trial', methods=['POST'])
+def generate_auto_trial():
     data = request.get_json()
-    if data.get("admin_key") != ADMIN_KEY: 
-        return jsonify({"status":"denied"}),403
+    if data.get("admin_key") != ADMIN_KEY: return jsonify({"status":"denied"}),403
     
     dur = int(data.get("duration_hours",3))
-    custom_user = data.get("custom_username","").strip()
-    custom_pass = data.get("custom_password","").strip()
-    custom_key = data.get("custom_license","").strip()
+    lic = f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
+    user = f"TRIAL-{uuid.uuid4().hex[:6].upper()}"
+    pwd = uuid.uuid4().hex[:10].upper()
 
-    lic = custom_key if custom_key else f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
-    user = custom_user if custom_user else f"TRIAL-{uuid.uuid4().hex[:6].upper()}"
-    pwd = custom_pass if custom_pass else uuid.uuid4().hex[:10].upper()
-
-    # ✅ NO HWID SAVE — WORKS ON ANY PC
     TRIAL_LICENSES[lic] = {
-    "type":"trial_unlimited",  # <-- NEW TYPE: NO LOCK
-    "hwid": None,              # <-- NO HWID STORED
+    "type":"trial_locked", # <-- LOCKS TO 1 PC
+    "hwid":"", # <-- WILL SAVE HWID & LOCK
     "duration_hours":dur,
-    "start_time":None,
     "expires_at": (datetime.utcnow() + timedelta(hours=dur)).isoformat()
     }
     TRIAL_USERS[user] = {"password":pwd,"linked_license":lic}
     save_data()
-    return jsonify({
-        "trial_license":lic,"trial_username":user,"trial_password":pwd,"duration_hours":dur
-    }),200
+    return jsonify({"license":lic,"username":user,"password":pwd}),200
+
+# ✅ API 2: CUSTOM LICENSE — ANY PC / NO LOCK
+@app.route('/api/admin/generate-custom-license', methods=['POST'])
+def generate_custom_license():
+    data = request.get_json()
+    if data.get("admin_key") != ADMIN_KEY: return jsonify({"status":"denied"}),403
+    
+    dur = int(data.get("duration_hours",3))
+    user = data.get("custom_username","").strip() or f"CUSTOM-{uuid.uuid4().hex[:6].upper()}"
+    pwd = data.get("custom_password","").strip() or uuid.uuid4().hex[:10].upper()
+    lic = data.get("custom_license","").strip() or f"JEPFX-CUSTOM-{uuid.uuid4().hex[:8].upper()}"
+
+    TRIAL_LICENSES[lic] = {
+    "type":"custom_unlocked", # <-- NO LOCK, ANY PC
+    "hwid": None, # <-- IGNORES HWID COMPLETELY
+    "duration_hours":dur,
+    "expires_at": (datetime.utcnow() + timedelta(hours=dur)).isoformat()
+    }
+    TRIAL_USERS[user] = {"password":pwd,"linked_license":lic}
+    save_data()
+    return jsonify({"license":lic,"username":user,"password":pwd}),200
 
 @app.route('/api/admin/get-all-trials', methods=['POST'])
 def get_all():
-    if request.get_json().get("admin_key") != ADMIN_KEY: 
-        return jsonify({"status":"denied"}),403
+    if request.get_json().get("admin_key") != ADMIN_KEY: return jsonify({"status":"denied"}),403
     now = datetime.utcnow()
     list_trials = []
     user_map = {u_data['linked_license']: (u, u_data['password']) for u, u_data in TRIAL_USERS.items()}
 
     for k,v in TRIAL_LICENSES.items():
-        status = "✅ ACTIVE (NO LOCK)"
+        status = "✅ ACTIVE"
         rem = "-"
         uname, upass = "-", "-"
+        typ = "❓ UNKNOWN"
         if k in user_map:
             uname, upass = user_map[k]
 
+        # Set type label
+        if v["type"] == "trial_locked":
+            typ = "🔒 AUTO (1 PC)"
+        elif v["type"] == "custom_unlocked":
+            typ = "♾️ CUSTOM (ANY PC)"
+
+        # Check expiration
         if v["expires_at"]:
             exp = datetime.fromisoformat(v["expires_at"])
             if exp > now:
@@ -317,7 +374,7 @@ def get_all():
                 rem = "EXPIRED"
 
         list_trials.append({
-        "license_key":k,"username":uname,"password":upass,
+        "type":typ,"license_key":k,"username":uname,"password":upass,
         "duration_hours":f"{v['duration_hours']}h","status":status,"remaining":rem
         })
     return jsonify({"trials":list_trials}),200
@@ -325,8 +382,7 @@ def get_all():
 @app.route('/api/admin/delete-trial', methods=['POST'])
 def delete_trial():
     data = request.get_json()
-    if data.get("admin_key") != ADMIN_KEY: 
-        return jsonify({"status":"denied"}), 403
+    if data.get("admin_key") != ADMIN_KEY: return jsonify({"status":"denied"}), 403
     key = data.get("license_key", "")
     if key in TRIAL_LICENSES:
         for user, user_data in list(TRIAL_USERS.items()):
@@ -338,7 +394,7 @@ def delete_trial():
     return jsonify({"status":"not_found"}), 404
 
 # ==================================================
-# 🔑 ACTIVATE & VERIFY — UPDATED FOR NO LOCK
+# 🔑 ACTIVATE & VERIFY — FULLY SEPARATED LOGIC
 # ==================================================
 @app.route('/api/activate', methods=['POST'])
 def activate():
@@ -359,13 +415,27 @@ def activate():
             else:
                 return jsonify({"status":"invalid_hwid"}), 403
 
-    # --- CUSTOM / TRIAL LICENSES — NO LOCK, ANY PC ---
-    elif key in TRIAL_LICENSES:
+    # --- AUTO GENERATED TRIAL (LOCKED TO 1 PC) ---
+    elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "trial_locked":
         lic = TRIAL_LICENSES[key]
         if lic["expires_at"] and datetime.fromisoformat(lic["expires_at"]) < now:
             return jsonify({"status":"expired"}), 403
-        
-        # ✅ IGNORE HWID COMPLETELY — WORKS EVERYWHERE
+
+        if lic["hwid"] == "": # First activation
+            lic["hwid"] = hwid
+            save_data()
+            return jsonify({"status":"activated"}), 200
+        elif lic["hwid"] == hwid: # Same PC
+            return jsonify({"status":"activated"}), 200
+        else: # Different PC
+            return jsonify({"status":"invalid_hwid"}), 403
+
+    # --- CUSTOM LICENSE (UNLOCKED / ANY PC) ---
+    elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "custom_unlocked":
+        lic = TRIAL_LICENSES[key]
+        if lic["expires_at"] and datetime.fromisoformat(lic["expires_at"]) < now:
+            return jsonify({"status":"expired"}), 403
+        # ✅ NO HWID CHECK — ALLOW ANY
         return jsonify({"status":"activated"}), 200
 
     return jsonify({"status":"invalid_key"}), 403
@@ -386,8 +456,18 @@ def verify():
         if lic["type"] == "single" and lic["hwid"] == hwid:
             return jsonify({"status":"valid"}), 200
 
-    # --- CUSTOM / TRIAL LICENSES — NO LOCK, ANY PC ---
-    elif key in TRIAL_LICENSES:
+    # --- AUTO GENERATED TRIAL (LOCKED) ---
+    elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "trial_locked":
+        lic = TRIAL_LICENSES[key]
+        if lic["hwid"] == hwid and lic["expires_at"]:
+            exp = datetime.fromisoformat(lic["expires_at"])
+            if exp > now:
+                return jsonify({"status":"valid"}), 200
+            else:
+                return jsonify({"status":"expired"}), 403
+
+    # --- CUSTOM LICENSE (UNLOCKED) ---
+    elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "custom_unlocked":
         lic = TRIAL_LICENSES[key]
         if lic["expires_at"]:
             exp = datetime.fromisoformat(lic["expires_at"])
@@ -409,7 +489,7 @@ def login():
     if user in VALID_USERS and VALID_USERS[user] == pwd:
         return jsonify({"status":"success"}), 200
 
-    # --- CUSTOM USERS — WORKS ANYWHERE ---
+    # --- ALL TRIAL / CUSTOM USERS ---
     for u, u_data in TRIAL_USERS.items():
         if u == user and u_data["password"] == pwd:
             return jsonify({"status":"success"}), 200
