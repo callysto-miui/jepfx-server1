@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # -------------------------- CONFIGURATION --------------------------
 DATA_FILE = "server_data.json"
-ADMIN_PASSWORD = "JEPFX123"  # ← USE THIS PASSWORD TO LOGIN
+ADMIN_PASSWORD = "ADMINJEPFX"
 ADMIN_KEY = "JEPFX-ADMIN-2026"
 
 # -------------------------- DATABASE --------------------------
@@ -65,7 +65,7 @@ def save_data():
 load_data()
 
 # -------------------------- ADMIN PANEL HTML --------------------------
-ADMIN_HTML = '''
+ADMIN_HTML = """
 <!DOCTYPE html>
 <html>
 <head>
@@ -101,7 +101,6 @@ ADMIN_HTML = '''
     <button class="btn-primary" onclick="checkLogin()">LOGIN</button>
     <p id="error-msg" style="color:#ef4444; display:none;">Wrong code! Try again.</p>
 </div>
-
 <div id="panel" class="panel-box">
     <h1>JEPFX ADMIN PANEL</h1>
     <div class="tabs">
@@ -163,7 +162,7 @@ function checkLogin(){
 function showTab(n){
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     document.querySelectorAll('.content').forEach(c=>c.classList.remove('active'));
-    document.querySelector('.tab[onclick="showTab(\\''+n+'\\')"]').classList.add('active');
+    document.querySelector('.tab[onclick=\"showTab(\\''+n+'\\')\"]').classList.add('active');
     document.getElementById(n).classList.add('active');
     if(n==='list') loadAll();
 }
@@ -201,7 +200,7 @@ async function loadAll(){
     tbl.innerHTML='<tr><th>USERNAME</th><th>LICENSE KEY</th><th>HOURS</th><th>STATUS</th><th>REMAINING TIME</th><th>ACTION</th></tr>';
     d.list.forEach(i=>{
         const row=tbl.insertRow(-1);
-        row.innerHTML='<td>'+i.username+'</td><td>'+i.license+'</td><td>'+i.hours+'</td><td>'+i.status+'</td><td>'+i.remaining+'</td><td><button class="btn-danger" onclick="deleteItem(\\''+i.license+'\\')">DELETE</button></td>';
+        row.innerHTML='<td>'+i.username+'</td><td>'+i.license+'</td><td>'+i.hours+'</td><td>'+i.status+'</td><td>'+i.remaining+'</td><td><button class=\"btn-danger\" onclick=\"deleteItem(\\''+i.license+'\\')\">DELETE</button></td>';
     })
 }
 
@@ -218,15 +217,12 @@ async function deleteItem(l){
 
 </body>
 </html>
-'''
+"""
 
 # -------------------------- ADMIN ROUTES --------------------------
 @app.route('/api/admin/check-pass', methods=['POST'])
 def api_check_pass():
-    data = request.get_json()
-    if data.get("code") == ADMIN_PASSWORD:
-        return jsonify({"ok": True}), 200
-    return jsonify({"ok": False}), 403
+    return jsonify({"ok": request.get_json().get("code") == ADMIN_PASSWORD}), 200
 
 @app.route('/admin')
 def admin_page():
@@ -363,7 +359,6 @@ def activate():
     if key in CUSTOM_LICENSES:
         lic = CUSTOM_LICENSES[key]
         if lic["start_time"] is None:
-            # First activation: start timer
             lic["start_time"] = now.isoformat()
             lic["activated_at"] = now.isoformat()
             lic["expires_at"] = (now + timedelta(hours=lic["duration_hours"])).isoformat()
@@ -382,7 +377,6 @@ def activate():
             else:
                 return jsonify({"status": "blocked", "msg": "Used on another PC"}), 403
 
-    # License not found
     return jsonify({"status": "invalid", "msg": "License key does not exist"}), 403
 
 
@@ -394,7 +388,7 @@ def verify():
     key_hash = data.get("hash", "")
     now = datetime.utcnow()
 
-    # Verify permanent licenses
+    # Check permanent licenses
     for key, lic in LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
             if lic["type"] == "unlimited" and hwid in lic["hwid"]:
@@ -402,12 +396,11 @@ def verify():
             if lic["type"] == "single" and lic["hwid"] == hwid:
                 return jsonify({"ok": True}), 200
 
-    # Verify custom licenses
+    # Check custom licenses
     for key, lic in CUSTOM_LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
             if not lic.get("expires_at"):
                 return jsonify({"invalid": True}), 403
-                
             exp_time = datetime.fromisoformat(str(lic["expires_at"]))
             if lic["hwid"] == hwid and now < exp_time:
                 return jsonify({"ok": True}), 200
@@ -433,13 +426,15 @@ def check_pass():
     data = request.get_json()
     username = data.get("username", "")
     password = data.get("password", "")
-    
-    # Check permanent users
+
     if username in VALID_USERS and VALID_USERS[username] == password:
         return jsonify({"ok": True}), 200
-    
-    # Check custom users
+
     if username in CUSTOM_USERS and CUSTOM_USERS[username]["password"] == password:
         return jsonify({"ok": True}), 200
 
     return "", 403
+
+
+# -------------------------- FIXED FOR RENDER --------------------------
+# No app.run() here — Render uses gunicorn server:app automatically
