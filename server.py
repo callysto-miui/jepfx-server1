@@ -22,7 +22,7 @@ ADMIN_KEY = "JEPFX-ADMIN-2026"
 # 📝 LICENSES & USERS
 # ==================================================
 LICENSES = {
-"JEPFX-2026-SECRET": {"type": "unlimited", "hwid": [], "expires_at": None},
+"JEPFX19": {"type": "unlimited", "hwid": [], "expires_at": None},
 "JEPFX-2026-001": {"type": "single", "hwid": "", "expires_at": None},
 "JEPFX-2026-002": {"type": "single", "hwid": "", "expires_at": None},
 "JEPFX-2026-003": {"type": "single", "hwid": "", "expires_at": None},
@@ -33,8 +33,7 @@ LICENSES = {
 VALID_USERS = {
 "JEPFX": "@JEPFX_1875",
 "SEAN": "SEAN_0",
-"N4XCO": "N4XCO_0",
-"RHYZ": "RHYZ_0"
+"N4XCO": "N4XCO_0"
 }
 
 TRIAL_LICENSES = {}
