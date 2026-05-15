@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # -------------------------- CONFIGURATION --------------------------
 DATA_FILE = "server_data.json"
-ADMIN_PASSWORD = "JEPFX-ADMIN"
+ADMIN_PASSWORD = "JEPFX123"  # ← USE THIS PASSWORD TO LOGIN
 ADMIN_KEY = "JEPFX-ADMIN-2026"
 
 # -------------------------- DATABASE --------------------------
@@ -61,9 +61,10 @@ def save_data():
     except Exception as e:
         print(f"❌ SAVE ERROR: {e}")
 
+# Load data when server starts
 load_data()
 
-# -------------------------- ADMIN PANEL HTML (FIXED STRING) --------------------------
+# -------------------------- ADMIN PANEL HTML --------------------------
 ADMIN_HTML = '''
 <!DOCTYPE html>
 <html>
@@ -222,7 +223,10 @@ async function deleteItem(l){
 # -------------------------- ADMIN ROUTES --------------------------
 @app.route('/api/admin/check-pass', methods=['POST'])
 def api_check_pass():
-    return jsonify({"ok": request.get_json().get("code") == ADMIN_PASSWORD}), 200
+    data = request.get_json()
+    if data.get("code") == ADMIN_PASSWORD:
+        return jsonify({"ok": True}), 200
+    return jsonify({"ok": False}), 403
 
 @app.route('/admin')
 def admin_page():
@@ -439,4 +443,3 @@ def check_pass():
         return jsonify({"ok": True}), 200
 
     return "", 403
-    
