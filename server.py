@@ -15,7 +15,7 @@ DATA_FILE = "server_data.json"
 # ==================================================
 # 🔐 ADMIN SETTINGS — CHANGE THESE TO YOUR OWN!
 # ==================================================
-ADMIN_PASSWORD = "YOUR_SECRET_CODE_HERE"  # ✅ CHANGE THIS!
+ADMIN_PASSWORD = "JEPFXADMIN"  # ✅ CHANGE THIS!
 ADMIN_KEY = "JEPFX-ADMIN-2026"
 
 # ==================================================
