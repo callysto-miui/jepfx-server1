@@ -118,7 +118,7 @@ ADMIN_HTML = """
         </div>
 
         <div id="generate" class="content active">
-            <!-- ✅ OPTION 1: AUTO GENERATE TRIAL (1 PC ONLY) -->
+            <!-- ✅ OPTION 1: AUTO GENERATE TRIAL (1 PC ONLY, STARTS ON ACTIVATION) -->
             <div class="section">
                 <h3>🔄 AUTO GENERATE TRIAL LICENSE</h3>
                 <label>Duration (Hours):</label>
@@ -187,7 +187,7 @@ ADMIN_HTML = """
             if(tabName === 'trials') loadTrials();
         }
 
-        // ✅ AUTO GENERATE (1 PC ONLY)
+        // ✅ AUTO GENERATE (1 PC ONLY, TIME STARTS ON ACTIVATION)
         async function generateAutoTrial() {
             const duration = document.getElementById('auto-duration').value;
             const res = await fetch(SERVER_URL + '/api/admin/generate-auto-trial', {
@@ -206,6 +206,7 @@ ADMIN_HTML = """
 🔒 PASS: ${data.password}
 ⏱️ TIME: ${duration} HOURS
 🔒 LOCKS TO 1ST PC ONLY
+⏳ TIME STARTS WHEN ACTIVATED
 ━━━━━━━━━━━━━━━━━━
                 `;
                 loadTrials();
@@ -300,7 +301,7 @@ def admin_page():
 def home():
     return "✅ SERVER RUNNING | /admin"
 
-# ✅ API 1: AUTO GENERATE TRIAL — 1 PC ONLY / LOCKS HWID
+# ✅ API 1: AUTO GENERATE TRIAL — 1 PC ONLY / TIME STARTS ON ACTIVATION
 @app.route('/api/admin/generate-auto-trial', methods=['POST'])
 def generate_auto_trial():
     data = request.get_json()
@@ -312,16 +313,17 @@ def generate_auto_trial():
     pwd = uuid.uuid4().hex[:10].upper()
 
     TRIAL_LICENSES[lic] = {
-    "type":"trial_locked", # <-- LOCKS TO 1 PC
-    "hwid":"", # <-- WILL SAVE HWID & LOCK
+    "type":"trial_locked",
+    "hwid":"",
     "duration_hours":dur,
-    "expires_at": (datetime.utcnow() + timedelta(hours=dur)).isoformat()
+    "expires_at": None,  # ⏳ NOT SET YET — WILL SET ON FIRST ACTIVATION
+    "activated_at": None
     }
     TRIAL_USERS[user] = {"password":pwd,"linked_license":lic}
     save_data()
     return jsonify({"license":lic,"username":user,"password":pwd}),200
 
-# ✅ API 2: CUSTOM LICENSE — ANY PC / NO LOCK
+# ✅ API 2: CUSTOM LICENSE — ANY PC / NO LOCK / TIME STARTS NOW
 @app.route('/api/admin/generate-custom-license', methods=['POST'])
 def generate_custom_license():
     data = request.get_json()
@@ -336,7 +338,8 @@ def generate_custom_license():
     "type":"custom_unlocked", # <-- NO LOCK, ANY PC
     "hwid": None, # <-- IGNORES HWID COMPLETELY
     "duration_hours":dur,
-    "expires_at": (datetime.utcnow() + timedelta(hours=dur)).isoformat()
+    "expires_at": (datetime.utcnow() + timedelta(hours=dur)).isoformat(), # ⏳ STARTS NOW
+    "activated_at": datetime.utcnow().isoformat()
     }
     TRIAL_USERS[user] = {"password":pwd,"linked_license":lic}
     save_data()
@@ -360,18 +363,29 @@ def get_all():
         # Set type label
         if v["type"] == "trial_locked":
             typ = "🔒 AUTO (1 PC)"
+            # Special status for trials waiting activation
+            if v["expires_at"] is None:
+                status = "⌛ WAITING ACTIVATION"
+                rem = "TIME NOT RUNNING"
+            else:
+                exp = datetime.fromisoformat(v["expires_at"])
+                if exp > now:
+                    diff = exp - now
+                    rem = f"{diff.days}d {diff.seconds//3600}h {(diff.seconds//60)%60}m"
+                else:
+                    status = "❌ EXPIRED"
+                    rem = "EXPIRED"
+
         elif v["type"] == "custom_unlocked":
             typ = "♾️ CUSTOM (ANY PC)"
-
-        # Check expiration
-        if v["expires_at"]:
-            exp = datetime.fromisoformat(v["expires_at"])
-            if exp > now:
-                diff = exp - now
-                rem = f"{diff.days}d {diff.seconds//3600}h {(diff.seconds//60)%60}m"
-            else:
-                status = "❌ EXPIRED"
-                rem = "EXPIRED"
+            if v["expires_at"]:
+                exp = datetime.fromisoformat(v["expires_at"])
+                if exp > now:
+                    diff = exp - now
+                    rem = f"{diff.days}d {diff.seconds//3600}h {(diff.seconds//60)%60}m"
+                else:
+                    status = "❌ EXPIRED"
+                    rem = "EXPIRED"
 
         list_trials.append({
         "type":typ,"license_key":k,"username":uname,"password":upass,
@@ -394,7 +408,7 @@ def delete_trial():
     return jsonify({"status":"not_found"}), 404
 
 # ==================================================
-# 🔑 ACTIVATE & VERIFY — FULLY SEPARATED LOGIC
+# 🔑 ACTIVATE & VERIFY — UPDATED LOGIC
 # ==================================================
 @app.route('/api/activate', methods=['POST'])
 def activate():
@@ -415,19 +429,27 @@ def activate():
             else:
                 return jsonify({"status":"invalid_hwid"}), 403
 
-    # --- AUTO GENERATED TRIAL (LOCKED TO 1 PC) ---
+    # --- AUTO GENERATED TRIAL (LOCKED / TIME STARTS NOW) ---
     elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "trial_locked":
         lic = TRIAL_LICENSES[key]
-        if lic["expires_at"] and datetime.fromisoformat(lic["expires_at"]) < now:
-            return jsonify({"status":"expired"}), 403
 
-        if lic["hwid"] == "": # First activation
+        # ⏳ FIRST ACTIVATION: SET TIME & LOCK
+        if lic["hwid"] == "":
             lic["hwid"] = hwid
+            lic["activated_at"] = now.isoformat()
+            lic["expires_at"] = (now + timedelta(hours=lic["duration_hours"])).isoformat()
             save_data()
             return jsonify({"status":"activated"}), 200
-        elif lic["hwid"] == hwid: # Same PC
-            return jsonify({"status":"activated"}), 200
-        else: # Different PC
+
+        # ALREADY ACTIVATED BEFORE
+        elif lic["hwid"] == hwid:
+            if datetime.fromisoformat(lic["expires_at"]) > now:
+                return jsonify({"status":"activated"}), 200
+            else:
+                return jsonify({"status":"expired"}), 403
+
+        # WRONG PC
+        else:
             return jsonify({"status":"invalid_hwid"}), 403
 
     # --- CUSTOM LICENSE (UNLOCKED / ANY PC) ---
@@ -459,12 +481,15 @@ def verify():
     # --- AUTO GENERATED TRIAL (LOCKED) ---
     elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "trial_locked":
         lic = TRIAL_LICENSES[key]
+        # Only valid if activated, locked to this PC, and not expired
         if lic["hwid"] == hwid and lic["expires_at"]:
             exp = datetime.fromisoformat(lic["expires_at"])
             if exp > now:
                 return jsonify({"status":"valid"}), 200
             else:
                 return jsonify({"status":"expired"}), 403
+        else:
+            return jsonify({"status":"invalid"}), 403
 
     # --- CUSTOM LICENSE (UNLOCKED) ---
     elif key in TRIAL_LICENSES and TRIAL_LICENSES[key]["type"] == "custom_unlocked":
