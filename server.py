@@ -1,70 +1,79 @@
 from flask import Flask, request, jsonify, render_template_string
 import hashlib
 from datetime import datetime, timedelta
+import uuid
 import json
 import os
 
 app = Flask(__name__)
 
-# -------------------------- CONFIGURATION --------------------------
+# ==================================================
+# 📂 PERMANENT DATA SAVE — NEVER DELETES
+# ==================================================
 DATA_FILE = "server_data.json"
-ADMIN_PASSWORD = "ADMINJEPFX"
+
+# ==================================================
+# 🔐 ADMIN SETTINGS — CHANGE THESE TO YOUR OWN!
+# ==================================================
+ADMIN_PASSWORD = "JEPFXADMIN"  # ✅ CHANGE THIS!
 ADMIN_KEY = "JEPFX-ADMIN-2026"
 
-# -------------------------- DATABASE --------------------------
+# ==================================================
+# 📝 LICENSES & USERS
+# ==================================================
 LICENSES = {
-    "JEPFX-2026-SECRET": {"type": "unlimited", "hwid": [], "expires_at": None},
-    "JEPFX-2026-001": {"type": "single", "hwid": "", "expires_at": None},
-    "JEPFX-2026-002": {"type": "single", "hwid": "", "expires_at": None},
-    "JEPFX-2026-003": {"type": "single", "hwid": "", "expires_at": None},
-    "JEPFX-2026-004": {"type": "single", "hwid": "", "expires_at": None},
-    "JEPFX-2026-005": {"type": "single", "hwid": "", "expires_at": None}
+"JEPFX-2026-SECRET": {"type": "unlimited", "hwid": [], "expires_at": None},
+"JEPFX-2026-001": {"type": "single", "hwid": "", "expires_at": None},
+"JEPFX-2026-002": {"type": "single", "hwid": "", "expires_at": None},
+"JEPFX-2026-003": {"type": "single", "hwid": "", "expires_at": None},
+"JEPFX-2026-004": {"type": "single", "hwid": "", "expires_at": None},
+"JEPFX-2026-005": {"type": "single", "hwid": "", "expires_at": None}
 }
 
 VALID_USERS = {
-    "JEPFX": "@JEPFX_1875",
-    "SEAN": "SEAN_0",
-    "N4XCO": "N4XCO_0"
+"JEPFX": "@JEPFX_1875",
+"SEAN": "SEAN_0",
+"N4XCO": "N4XCO_0",
+"RHYZ": "RHYZ_0"
 }
 
-CUSTOM_LICENSES = {}
-CUSTOM_USERS = {}
+TRIAL_LICENSES = {}
+TRIAL_USERS = {}
 
-# -------------------------- SAVE / LOAD SYSTEM --------------------------
+# ==================================================
+# 💾 SAVE / LOAD DATA — FIXED VERSION
+# ==================================================
 def load_data():
-    global CUSTOM_LICENSES, CUSTOM_USERS
+    global TRIAL_LICENSES, TRIAL_USERS
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as f:
                 data = json.load(f)
-                CUSTOM_LICENSES = data.get("custom_licenses", {})
-                CUSTOM_USERS = data.get("custom_users", {})
+            TRIAL_LICENSES = data.get("trials", {})
+            TRIAL_USERS = data.get("users", {})
             print("✅ DATA LOADED SUCCESSFULLY")
         except Exception as e:
-            print(f"⚠️ LOAD ERROR: {e} — CREATING NEW FILE")
-            CUSTOM_LICENSES = {}
-            CUSTOM_USERS = {}
+            print(f"⚠️ LOAD ERROR: {e} — CREATING NEW")
+            TRIAL_LICENSES = {}
+            TRIAL_USERS = {}
             save_data()
     else:
-        print("ℹ️ NO DATA FILE — CREATING NEW")
+        print("📄 NO FILE — CREATING NEW")
         save_data()
 
 def save_data():
-    data = {
-        "custom_licenses": CUSTOM_LICENSES,
-        "custom_users": CUSTOM_USERS
-    }
+    data = {"trials": TRIAL_LICENSES, "users": TRIAL_USERS}
     try:
         with open(DATA_FILE, "w") as f:
             json.dump(data, f, indent=2, default=str)
         print("💾 DATA SAVED SUCCESSFULLY")
     except Exception as e:
         print(f"❌ SAVE ERROR: {e}")
+        load_data()
 
-# Load data when server starts
-load_data()
-
-# -------------------------- ADMIN PANEL HTML --------------------------
+# ==================================================
+# 🎨 ADMIN PANEL HTML — UPDATED WITH CUSTOM FIELDS
+# ==================================================
 ADMIN_HTML = """
 <!DOCTYPE html>
 <html>
@@ -72,157 +81,179 @@ ADMIN_HTML = """
     <title>JEPFX ADMIN PANEL</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        * {box-sizing:border-box; font-family:Arial,sans-serif;}
-        body {background:#1a103d; color:white; margin:0; padding:20px;}
-        .login-box {max-width:400px; margin:50px auto; background:#241854; padding:30px; border-radius:10px; text-align:center;}
-        .panel-box {display:none;}
-        .panel-box.active {display:block;}
-        h1,h2 {color:#7B61FF;}
-        input {width:100%; padding:12px; margin:10px 0; border:none; border-radius:5px; background:#3a2b70; color:white; font-size:16px;}
-        button {padding:12px 25px; margin:10px 5px; border:none; border-radius:5px; cursor:pointer; font-size:16px; font-weight:bold;}
-        .btn-primary {background:#7B61FF; color:white;}
-        .btn-danger {background:#ef4444; color:white;}
-        .tabs {display:flex; gap:10px; margin-bottom:20px;}
-        .tab {padding:12px 25px; background:#241854; border-radius:5px; cursor:pointer;}
-        .tab.active {background:#7B61FF;}
-        table {width:100%; border-collapse:collapse; margin-top:20px; background:#241854;}
-        th,td {padding:12px; text-align:center; border-bottom:1px solid #3a2b70;}
-        th {background:#3a2b70;}
-        .result {background:#241854; padding:20px; border-radius:5px; margin-top:20px; white-space:pre-line;}
-        .note {color:#aaa; font-size:14px; margin:-8px 0 10px 0;}
+        * { box-sizing: border-box; font-family: Arial, sans-serif; }
+        body { background: #1a103d; color: white; margin: 0; padding: 20px; }
+        .login-box { max-width: 400px; margin: 50px auto; background: #241854; padding: 30px; border-radius: 10px; text-align: center; }
+        .panel-box { display: none; }
+        .panel-box.active { display: block; }
+        h1, h2 { color: #7B61FF; }
+        input, select { width: 100%; padding: 12px; margin: 10px 0; border: none; border-radius: 5px; background: #3a2b70; color: white; font-size: 16px; }
+        button { padding: 12px 25px; margin: 10px 5px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        .btn-primary { background: #7B61FF; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab { padding: 12px 25px; background: #241854; border-radius: 5px; cursor: pointer; }
+        .tab.active { background: #7B61FF; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #241854; }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #3a2b70; }
+        th { background: #3a2b70; }
+        .result { background: #241854; padding: 20px; border-radius: 5px; margin-top: 20px; white-space: pre-line; }
     </style>
 </head>
 <body>
-
-<div id="login-screen" class="login-box">
-    <h2>ADMIN LOGIN</h2>
-    <p>Enter access code to continue</p>
-    <input type="password" id="password-input" placeholder="Enter code..." autocomplete="off">
-    <button class="btn-primary" onclick="checkLogin()">LOGIN</button>
-    <p id="error-msg" style="color:#ef4444; display:none;">Wrong code! Try again.</p>
-</div>
-<div id="panel" class="panel-box">
-    <h1>JEPFX ADMIN PANEL</h1>
-    <div class="tabs">
-        <div class="tab active" onclick="showTab('create')">CREATE CUSTOM</div>
-        <div class="tab" onclick="showTab('list')">VIEW ALL</div>
+    <div id="login-screen" class="login-box">
+        <h2>🔒 ADMIN LOGIN</h2>
+        <p>Enter access code to continue</p>
+        <input type="password" id="password-input" placeholder="Enter code..." autocomplete="off">
+        <button class="btn-primary" onclick="checkLogin()">LOGIN</button>
+        <p id="error-msg" style="color: #ef4444; display: none;">Wrong code! Try again.</p>
     </div>
 
-    <div id="create" class="content active">
-        <h3>Create Custom Activation</h3>
-        <label>Custom Username:</label>
-        <input type="text" id="cust_user" placeholder="e.g. USER_001" required>
+    <div id="panel" class="panel-box">
+        <h1>⚡ JEPFX ADMIN PANEL</h1>
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('generate')">GENERATE TRIAL</div>
+            <div class="tab" onclick="showTab('trials')">VIEW TRIALS</div>
+        </div>
 
-        <label>Custom Password:</label>
-        <input type="text" id="cust_pass" placeholder="e.g. PASS_999" required>
+        <div id="generate" class="content active">
+            <h3>Create New Trial License</h3>
+            
+            <label>Custom Username:</label>
+            <input type="text" id="custom-user" placeholder="Leave blank for auto-generate">
 
-        <label>Custom License Key:</label>
-        <input type="text" id="cust_license" placeholder="e.g. MY-LICENSE-777" required>
+            <label>Custom Password:</label>
+            <input type="text" id="custom-pass" placeholder="Leave blank for auto-generate">
 
-        <label>Duration (Hours):</label>
-        <input type="number" id="cust_hours" placeholder="e.g. 168, 500, 1000..." min="1" value="168" required>
-        <p class="note">*You can input ANY number, even higher than 168</p>
+            <label>Custom License Key:</label>
+            <input type="text" id="custom-key" placeholder="Leave blank for auto-generate">
 
-        <br>
-        <button class="btn-primary" onclick="makeCustom()">CREATE NOW</button>
-        <div id="output" class="result" style="display:none;"></div>
+            <label>Duration (Hours):</label>
+            <input type="number" id="duration" min="1" value="3" placeholder="Enter hours (168+ allowed)">
+
+            <br>
+            <button class="btn-primary" onclick="createTrial()">GENERATE LICENSE</button>
+            <div id="result" class="result" style="display: none;"></div>
+        </div>
+        <div id="trials" class="content">
+            <h3>All Active Trials</h3>
+            <button class="btn-primary" onclick="loadTrials()">REFRESH LIST</button>
+            <table id="trials-table">
+                <tr><th>LICENSE KEY</th><th>USERNAME</th><th>PASSWORD</th><th>DURATION</th><th>STATUS</th><th>REMAINING</th><th>ACTION</th></tr>
+            </table>
+        </div>
     </div>
 
-    <div id="list" class="content">
-        <h3>All Created Activations</h3>
-        <button class="btn-primary" onclick="loadAll()">REFRESH</button>
-        <table id="data-table">
-            <tr><th>USERNAME</th><th>LICENSE KEY</th><th>HOURS</th><th>STATUS</th><th>REMAINING TIME</th><th>ACTION</th></tr>
-        </table>
-    </div>
-</div>
+    <script>
+        const SERVER_URL = window.location.origin;
+        const ADMIN_KEY = "{{ admin_key }}";
 
-<script>
-const SERVER_URL = window.location.origin;
-const ADMIN_KEY = "{{ admin_key }}";
-
-function checkLogin(){
-    const code=document.getElementById('password-input').value;
-    fetch(SERVER_URL+'/api/admin/check-pass',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({code:code})
-    })
-    .then(r=>r.json())
-    .then(d=>{
-        if(d.ok){
-            document.getElementById('login-screen').style.display='none';
-            document.getElementById('panel').classList.add('active');
-        }else{
-            document.getElementById('error-msg').style.display='block';
+        function checkLogin() {
+            const inputCode = document.getElementById('password-input').value;
+            fetch(SERVER_URL + '/api/admin/check-password', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code: inputCode})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    document.getElementById('login-screen').style.display = 'none';
+                    document.getElementById('panel').classList.add('active');
+                } else {
+                    document.getElementById('error-msg').style.display = 'block';
+                }
+            });
         }
-    })
-}
 
-function showTab(n){
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    document.querySelectorAll('.content').forEach(c=>c.classList.remove('active'));
-    document.querySelector('.tab[onclick=\"showTab(\\''+n+'\\')\"]').classList.add('active');
-    document.getElementById(n).classList.add('active');
-    if(n==='list') loadAll();
-}
+        function showTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.tab[onclick="showTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(tabName).classList.add('active');
+            if(tabName === 'trials') loadTrials();
+        }
 
-async function makeCustom(){
-    const u=document.getElementById('cust_user').value.trim();
-    const p=document.getElementById('cust_pass').value.trim();
-    const l=document.getElementById('cust_license').value.trim();
-    const h=parseInt(document.getElementById('cust_hours').value);
-    if(!u||!p||!l||!h) return alert('Fill all fields!');
+        async function createTrial() {
+            const duration = document.getElementById('duration').value;
+            const customUser = document.getElementById('custom-user').value;
+            const customPass = document.getElementById('custom-pass').value;
+            const customKey = document.getElementById('custom-key').value;
 
-    const r=await fetch(SERVER_URL+'/api/admin/create-custom',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({admin_key:ADMIN_KEY,username:u,password:p,license:l,hours:h})
-    });
-    const d=await r.json();
-    document.getElementById('output').style.display='block';
-    if(r.ok){
-        document.getElementById('output').innerHTML='SUCCESSFULLY CREATED\n--------------------\nUSERNAME : '+u+'\nPASSWORD : '+p+'\nLICENSE  : '+l+'\nDURATION : '+h+' HOURS\n--------------------\nREADY TO USE!';
-        loadAll();
-    }else{
-        document.getElementById('output').innerHTML='ERROR: Username or License already exists!';
-    }
-}
+            const res = await fetch(SERVER_URL + '/api/admin/generate-trial', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    admin_key: ADMIN_KEY,
+                    duration_hours: parseInt(duration),
+                    custom_username: customUser,
+                    custom_password: customPass,
+                    custom_license: customKey
+                })
+            });
 
-async function loadAll(){
-    const r=await fetch(SERVER_URL+'/api/admin/get-all',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({admin_key:ADMIN_KEY})
-    });
-    const d=await r.json();
-    const tbl=document.getElementById('data-table');
-    tbl.innerHTML='<tr><th>USERNAME</th><th>LICENSE KEY</th><th>HOURS</th><th>STATUS</th><th>REMAINING TIME</th><th>ACTION</th></tr>';
-    d.list.forEach(i=>{
-        const row=tbl.insertRow(-1);
-        row.innerHTML='<td>'+i.username+'</td><td>'+i.license+'</td><td>'+i.hours+'</td><td>'+i.status+'</td><td>'+i.remaining+'</td><td><button class=\"btn-danger\" onclick=\"deleteItem(\\''+i.license+'\\')\">DELETE</button></td>';
-    })
-}
+            const data = await res.json();
+            document.getElementById('result').style.display = 'block';
+            if(res.ok) {
+                document.getElementById('result').innerHTML = `
+✅ TRIAL CREATED
+━━━━━━━━━━━━━━━━━━
+🔑 LICENSE: ${data.trial_license}
+👤 USER: ${data.trial_username}
+🔒 PASS: ${data.trial_password}
+⏱️ TIME: ${data.duration_hours} HOURS
+♾️ WORKS ON ANY PC — NO LIMIT
+━━━━━━━━━━━━━━━━━━
+                `;
+                loadTrials();
+            } else {
+                document.getElementById('result').innerHTML = '❌ ERROR!';
+            }
+        }
 
-async function deleteItem(l){
-    if(!confirm('Delete this activation?')) return;
-    await fetch(SERVER_URL+'/api/admin/delete',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({admin_key:ADMIN_KEY,license:l})
-    });
-    loadAll();
-}
-</script>
+        async function loadTrials() {
+            const res = await fetch(SERVER_URL + '/api/admin/get-all-trials', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({admin_key: ADMIN_KEY})
+            });
+            const data = await res.json();
+            const table = document.getElementById('trials-table');
+            table.innerHTML = `<tr><th>LICENSE KEY</th><th>USERNAME</th><th>PASSWORD</th><th>DURATION</th><th>STATUS</th><th>REMAINING</th><th>ACTION</th></tr>`;
+            
+            data.trials.forEach(trial => {
+                const row = table.insertRow(-1);
+                row.innerHTML = `
+                    <td>${trial.license_key}</td>
+                    <td>${trial.username}</td>
+                    <td>${trial.password}</td>
+                    <td>${trial.duration_hours}</td>
+                    <td>${trial.status}</td>
+                    <td>${trial.remaining}</td>
+                    <td><button class="btn-danger" onclick="deleteTrial('${trial.license_key}')">DELETE</button></td>
+                `;
+            });
+        }
 
-</body>
-</html>
+        async function deleteTrial(key) {
+            if(!confirm('Delete this trial?')) return;
+            await fetch(SERVER_URL + '/api/admin/delete-trial', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({admin_key: ADMIN_KEY, license_key: key})
+            });
+            loadTrials();
+        }
+    </script>
+</body></html>
 """
 
-# -------------------------- ADMIN ROUTES --------------------------
-@app.route('/api/admin/check-pass', methods=['POST'])
-def api_check_pass():
-    return jsonify({"ok": request.get_json().get("code") == ADMIN_PASSWORD}), 200
+# ==================================================
+# 🔐 APIs — UPDATED: CUSTOM LICENSES = NO HWID LOCK
+# ==================================================
+@app.route('/api/admin/check-password', methods=['POST'])
+def check_password():
+    return jsonify({"success": request.get_json().get("code") == ADMIN_PASSWORD}), 200
 
 @app.route('/admin')
 def admin_page():
@@ -230,108 +261,85 @@ def admin_page():
 
 @app.route('/')
 def home():
-    return "SERVER RUNNING | Open /admin to access panel"
+    return "✅ SERVER RUNNING | /admin"
 
-@app.route('/api/admin/create-custom', methods=['POST'])
-def api_create_custom():
+@app.route('/api/admin/generate-trial', methods=['POST'])
+def generate_trial():
     data = request.get_json()
-    if data.get("admin_key") != ADMIN_KEY:
-        return jsonify({"error": "unauthorized"}), 403
+    if data.get("admin_key") != ADMIN_KEY: 
+        return jsonify({"status":"denied"}),403
+    
+    dur = int(data.get("duration_hours",3))
+    custom_user = data.get("custom_username","").strip()
+    custom_pass = data.get("custom_password","").strip()
+    custom_key = data.get("custom_license","").strip()
 
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-    license_key = data.get("license", "").strip()
-    hours = int(data.get("hours", 168))
+    lic = custom_key if custom_key else f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
+    user = custom_user if custom_user else f"TRIAL-{uuid.uuid4().hex[:6].upper()}"
+    pwd = custom_pass if custom_pass else uuid.uuid4().hex[:10].upper()
 
-    if license_key in CUSTOM_LICENSES or license_key in LICENSES:
-        return jsonify({"error": "exists"}), 400
-    if username in CUSTOM_USERS or username in VALID_USERS:
-        return jsonify({"error": "exists"}), 400
-
-    CUSTOM_LICENSES[license_key] = {
-        "hwid": "",
-        "duration_hours": hours,
-        "start_time": None,
-        "expires_at": None,
-        "activated_at": None
+    # ✅ NO HWID SAVE — WORKS ON ANY PC
+    TRIAL_LICENSES[lic] = {
+    "type":"trial_unlimited",  # <-- NEW TYPE: NO LOCK
+    "hwid": None,              # <-- NO HWID STORED
+    "duration_hours":dur,
+    "start_time":None,
+    "expires_at": (datetime.utcnow() + timedelta(hours=dur)).isoformat()
     }
-    CUSTOM_USERS[username] = {"password": password, "linked_license": license_key}
+    TRIAL_USERS[user] = {"password":pwd,"linked_license":lic}
     save_data()
-    return jsonify({"success": True}), 200
-# -------------------------- GET ALL ACTIVATIONS --------------------------
-@app.route('/api/admin/get-all', methods=['POST'])
-def api_get_all():
-    data = request.get_json()
-    if data.get("admin_key") != ADMIN_KEY:
-        return jsonify({"error": "unauthorized"}), 403
+    return jsonify({
+        "trial_license":lic,"trial_username":user,"trial_password":pwd,"duration_hours":dur
+    }),200
 
+@app.route('/api/admin/get-all-trials', methods=['POST'])
+def get_all():
+    if request.get_json().get("admin_key") != ADMIN_KEY: 
+        return jsonify({"status":"denied"}),403
     now = datetime.utcnow()
-    result_list = []
+    list_trials = []
+    user_map = {u_data['linked_license']: (u, u_data['password']) for u, u_data in TRIAL_USERS.items()}
 
-    # Permanent licenses
-    for key, lic in LICENSES.items():
-        result_list.append({
-            "username": "PERMANENT",
-            "license": key,
-            "hours": "UNLIMITED",
-            "status": "PERMANENT",
-            "remaining": "FOREVER"
-        })
+    for k,v in TRIAL_LICENSES.items():
+        status = "✅ ACTIVE (NO LOCK)"
+        rem = "-"
+        uname, upass = "-", "-"
+        if k in user_map:
+            uname, upass = user_map[k]
 
-    # Custom / trial licenses
-    for key, lic in CUSTOM_LICENSES.items():
-        linked_user = "UNKNOWN"
-        for user, user_data in CUSTOM_USERS.items():
-            if user_data["linked_license"] == key:
-                linked_user = user
-
-        status = "NOT ACTIVATED"
-        remaining = "-"
-
-        if lic["expires_at"]:
-            exp_time = datetime.fromisoformat(str(lic["expires_at"]))
-            if now > exp_time:
-                status = "EXPIRED"
-                remaining = "EXPIRED"
+        if v["expires_at"]:
+            exp = datetime.fromisoformat(v["expires_at"])
+            if exp > now:
+                diff = exp - now
+                rem = f"{diff.days}d {diff.seconds//3600}h {(diff.seconds//60)%60}m"
             else:
-                status = "ACTIVE"
-                diff = exp_time - now
-                remaining = f"{diff.days}d {diff.seconds//3600}h {(diff.seconds//60)%60}m"
+                status = "❌ EXPIRED"
+                rem = "EXPIRED"
 
-        result_list.append({
-            "username": linked_user,
-            "license": key,
-            "hours": lic["duration_hours"],
-            "status": status,
-            "remaining": remaining
+        list_trials.append({
+        "license_key":k,"username":uname,"password":upass,
+        "duration_hours":f"{v['duration_hours']}h","status":status,"remaining":rem
         })
+    return jsonify({"trials":list_trials}),200
 
-    return jsonify({"list": result_list}), 200
-
-
-# -------------------------- DELETE ACTIVATION --------------------------
-@app.route('/api/admin/delete', methods=['POST'])
-def api_delete():
+@app.route('/api/admin/delete-trial', methods=['POST'])
+def delete_trial():
     data = request.get_json()
-    if data.get("admin_key") != ADMIN_KEY:
-        return jsonify({"error": "unauthorized"}), 403
-
-    license_key = data.get("license", "").strip()
-
-    if license_key in CUSTOM_LICENSES:
-        # Delete linked user
-        for user, user_data in list(CUSTOM_USERS.items()):
-            if user_data["linked_license"] == license_key:
-                del CUSTOM_USERS[user]
-        # Delete license
-        del CUSTOM_LICENSES[license_key]
+    if data.get("admin_key") != ADMIN_KEY: 
+        return jsonify({"status":"denied"}), 403
+    key = data.get("license_key", "")
+    if key in TRIAL_LICENSES:
+        for user, user_data in list(TRIAL_USERS.items()):
+            if user_data["linked_license"] == key:
+                del TRIAL_USERS[user]
+        del TRIAL_LICENSES[key]
         save_data()
-        return jsonify({"success": True}), 200
+        return jsonify({"status":"deleted"}), 200
+    return jsonify({"status":"not_found"}), 404
 
-    return jsonify({"error": "not_found"}), 404
-
-
-# -------------------------- ACTIVATE SYSTEM --------------------------
+# ==================================================
+# 🔑 ACTIVATE & VERIFY — UPDATED FOR NO LOCK
+# ==================================================
 @app.route('/api/activate', methods=['POST'])
 def activate():
     data = request.get_json()
@@ -339,102 +347,76 @@ def activate():
     hwid = data.get("hardware_id", "").strip()
     now = datetime.utcnow()
 
-    # Permanent licenses
+    # --- ORIGINAL PERMANENT LICENSES ---
     if key in LICENSES:
         lic = LICENSES[key]
         if lic["type"] == "unlimited":
-            if hwid not in lic["hwid"]:
-                lic["hwid"].append(hwid)
-            return jsonify({"status": "activated"}), 200
+            return jsonify({"status":"activated"}), 200
         if lic["type"] == "single":
-            if lic["hwid"] == "":
+            if lic["hwid"] == "" or lic["hwid"] == hwid:
                 lic["hwid"] = hwid
-                return jsonify({"status": "activated"}), 200
-            elif lic["hwid"] == hwid:
-                return jsonify({"status": "activated"}), 200
+                return jsonify({"status":"activated"}), 200
             else:
-                return jsonify({"status": "blocked", "msg": "Used on another PC"}), 403
+                return jsonify({"status":"invalid_hwid"}), 403
 
-    # Custom / trial licenses
-    if key in CUSTOM_LICENSES:
-        lic = CUSTOM_LICENSES[key]
-        if lic["start_time"] is None:
-            lic["start_time"] = now.isoformat()
-            lic["activated_at"] = now.isoformat()
-            lic["expires_at"] = (now + timedelta(hours=lic["duration_hours"])).isoformat()
-            lic["hwid"] = hwid
-            save_data()
-            return jsonify({
-                "status": "activated",
-                "msg": f"Activated! Expires in {lic['duration_hours']} hours"
-            }), 200
-        else:
-            exp_time = datetime.fromisoformat(str(lic["expires_at"]))
-            if now > exp_time:
-                return jsonify({"status": "expired", "msg": "License already expired"}), 403
-            if lic["hwid"] == hwid:
-                return jsonify({"status": "activated"}), 200
-            else:
-                return jsonify({"status": "blocked", "msg": "Used on another PC"}), 403
+    # --- CUSTOM / TRIAL LICENSES — NO LOCK, ANY PC ---
+    elif key in TRIAL_LICENSES:
+        lic = TRIAL_LICENSES[key]
+        if lic["expires_at"] and datetime.fromisoformat(lic["expires_at"]) < now:
+            return jsonify({"status":"expired"}), 403
+        
+        # ✅ IGNORE HWID COMPLETELY — WORKS EVERYWHERE
+        return jsonify({"status":"activated"}), 200
 
-    return jsonify({"status": "invalid", "msg": "License key does not exist"}), 403
+    return jsonify({"status":"invalid_key"}), 403
 
 
-# -------------------------- VERIFY LICENSE --------------------------
-@app.route('/api/verify-license', methods=['POST'])
+@app.route('/api/verify', methods=['POST'])
 def verify():
     data = request.get_json()
-    hwid = data.get("hwid", "")
-    key_hash = data.get("hash", "")
+    key = data.get("license_key", "").strip()
+    hwid = data.get("hardware_id", "").strip()
     now = datetime.utcnow()
 
-    # Check permanent licenses
-    for key, lic in LICENSES.items():
-        if hashlib.sha256(key.encode()).hexdigest() == key_hash:
-            if lic["type"] == "unlimited" and hwid in lic["hwid"]:
-                return jsonify({"ok": True}), 200
-            if lic["type"] == "single" and lic["hwid"] == hwid:
-                return jsonify({"ok": True}), 200
+    # --- ORIGINAL PERMANENT LICENSES ---
+    if key in LICENSES:
+        lic = LICENSES[key]
+        if lic["type"] == "unlimited":
+            return jsonify({"status":"valid"}), 200
+        if lic["type"] == "single" and lic["hwid"] == hwid:
+            return jsonify({"status":"valid"}), 200
 
-    # Check custom licenses
-    for key, lic in CUSTOM_LICENSES.items():
-        if hashlib.sha256(key.encode()).hexdigest() == key_hash:
-            if not lic.get("expires_at"):
-                return jsonify({"invalid": True}), 403
-            exp_time = datetime.fromisoformat(str(lic["expires_at"]))
-            if lic["hwid"] == hwid and now < exp_time:
-                return jsonify({"ok": True}), 200
-            if now > exp_time:
-                return jsonify({"expired": True}), 403
-            return jsonify({"invalid": True}), 403
+    # --- CUSTOM / TRIAL LICENSES — NO LOCK, ANY PC ---
+    elif key in TRIAL_LICENSES:
+        lic = TRIAL_LICENSES[key]
+        if lic["expires_at"]:
+            exp = datetime.fromisoformat(lic["expires_at"])
+            if exp > now:
+                return jsonify({"status":"valid"}), 200
+            else:
+                return jsonify({"status":"expired"}), 403
 
-    return jsonify({"invalid": True}), 403
+    return jsonify({"status":"invalid"}), 403
 
 
-# -------------------------- VALIDATE USER --------------------------
-@app.route('/api/validate-user', methods=['POST'])
-def validate_user():
-    username = request.get_json().get("username", "")
-    if username in VALID_USERS or username in CUSTOM_USERS:
-        return jsonify({"ok": True}), 200
-    return "", 403
-
-
-# -------------------------- CHECK PASSWORD --------------------------
-@app.route('/api/check-password', methods=['POST'])
-def check_pass():
+@app.route('/api/login', methods=['POST'])
+def login():
     data = request.get_json()
-    username = data.get("username", "")
-    password = data.get("password", "")
+    user = data.get("username", "").strip()
+    pwd = data.get("password", "").strip()
 
-    if username in VALID_USERS and VALID_USERS[username] == password:
-        return jsonify({"ok": True}), 200
+    # --- ORIGINAL ADMIN/USERS ---
+    if user in VALID_USERS and VALID_USERS[user] == pwd:
+        return jsonify({"status":"success"}), 200
 
-    if username in CUSTOM_USERS and CUSTOM_USERS[username]["password"] == password:
-        return jsonify({"ok": True}), 200
+    # --- CUSTOM USERS — WORKS ANYWHERE ---
+    for u, u_data in TRIAL_USERS.items():
+        if u == user and u_data["password"] == pwd:
+            return jsonify({"status":"success"}), 200
 
-    return "", 403
+    return jsonify({"status":"invalid"}), 401
 
 
-# -------------------------- FIXED FOR RENDER --------------------------
-# No app.run() here — Render uses gunicorn server:app automatically
+if __name__ == "__main__":
+    load_data()
+    app.run(host="0.0.0.0", port=5000, debug=True)
