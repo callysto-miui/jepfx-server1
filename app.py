@@ -61,8 +61,8 @@ CREDIT_PRICING = {
     "custom_day": 1,
     "custom_week": 5,
     "custom_month": 10,
-    "custom_year": 30,
-    "custom_unlimited": 500,
+    "custom_year": 50,
+    "custom_unlimited": 800,
     "permanent": 500
 }
 
