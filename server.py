@@ -26,11 +26,11 @@ MASTER_ADMIN = {
     "created_at": None
 }
 
-ADMINS = {}  # Will be loaded from JSON
-MODERATORS = {}  # Will be loaded from JSON
+ADMINS = {}
+MODERATORS = {}
 
 # ==================================================
-# 📝 LICENSES & USERS (Now with owner tracking)
+# 📝 LICENSES & USERS
 # ==================================================
 PERMANENT_LICENSES = {}
 CUSTOM_ACTIVATIONS = {}
@@ -38,8 +38,15 @@ TRIAL_LICENSES = {}
 TRIAL_USERS = {}
 USAGE_LOGS = {}
 
-# Each license now has an "owner" field to track who created it
-# Example: TRIAL_LICENSES[key] = {"owner": "admin_username", ...}
+# ==================================================
+# 📜 LICENSE HISTORY - Stores ALL created licenses forever
+# ==================================================
+LICENSE_HISTORY = []
+
+# ==================================================
+# 📨 USER REQUESTS - For extension/reactivation requests
+# ==================================================
+USER_REQUESTS = []  # Each request: {license_key, username, request_type, message, contact, status, created_at}
 
 VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
@@ -49,7 +56,7 @@ VALID_USERS = {
 # 💰 CREDIT PRICING SYSTEM
 # ==================================================
 CREDIT_PRICING = {
-    "trial_hour": 0.1,  # 0.1 credit per hour
+    "trial_hour": 0.1,
     "custom_hour": 0.1,
     "custom_day": 1,
     "custom_week": 5,
@@ -59,11 +66,14 @@ CREDIT_PRICING = {
     "permanent": 50
 }
 
+# Telegram contact (user can change this)
+TELEGRAM_CONTACT = "t.me/JEPFX_0"
+
 # ==================================================
 # 💾 SAVE / LOAD DATA
 # ==================================================
 def load_data():
-    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS, VALID_USERS
+    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS, VALID_USERS, LICENSE_HISTORY, USER_REQUESTS
     
     if os.path.exists(DATA_FILE):
         try:
@@ -77,7 +87,9 @@ def load_data():
                 ADMINS = data.get("admins", {})
                 MODERATORS = data.get("moderators", {})
                 VALID_USERS.update(data.get("valid_users", {}))
-            print("✅ DATA LOADED SUCCESSFULLY")
+                LICENSE_HISTORY = data.get("license_history", [])
+                USER_REQUESTS = data.get("user_requests", [])
+            print(f"✅ DATA LOADED: {len(LICENSE_HISTORY)} licenses, {len(USER_REQUESTS)} requests")
         except Exception as e:
             print(f"⚠️ LOAD ERROR: {e}")
             reset_data()
@@ -85,7 +97,7 @@ def load_data():
         reset_data()
 
 def reset_data():
-    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS
+    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS, LICENSE_HISTORY, USER_REQUESTS
     TRIAL_LICENSES = {}
     TRIAL_USERS = {}
     PERMANENT_LICENSES = {}
@@ -93,6 +105,8 @@ def reset_data():
     USAGE_LOGS = {}
     ADMINS = {}
     MODERATORS = {}
+    LICENSE_HISTORY = []
+    USER_REQUESTS = []
     save_data()
 
 def save_data():
@@ -104,7 +118,9 @@ def save_data():
         "usage_logs": USAGE_LOGS,
         "admins": ADMINS,
         "moderators": MODERATORS,
-        "valid_users": VALID_USERS
+        "valid_users": VALID_USERS,
+        "license_history": LICENSE_HISTORY,
+        "user_requests": USER_REQUESTS
     }
     try:
         with open(DATA_FILE, "w") as f:
@@ -114,6 +130,29 @@ def save_data():
         print(f"❌ SAVE ERROR: {e}")
 
 load_data()
+
+# ==================================================
+# 📜 LICENSE HISTORY FUNCTION
+# ==================================================
+def add_to_history(license_key, username, password, license_type, owner, expires_at, details=None):
+    history_entry = {
+        "license_key": license_key,
+        "username": username,
+        "password": password,
+        "type": license_type,
+        "owner": owner,
+        "created_at": datetime.utcnow().isoformat(),
+        "expires_at": expires_at,
+        "details": details or {}
+    }
+    LICENSE_HISTORY.append(history_entry)
+    save_data()
+    print(f"📜 Added to history: {license_key} ({license_type})")
+
+def get_history_by_owner(owner, role):
+    if role == "master":
+        return LICENSE_HISTORY
+    return [h for h in LICENSE_HISTORY if h.get("owner") == owner]
 
 # ==================================================
 # 📊 USAGE TRACKING
@@ -149,26 +188,21 @@ def get_usage_stats(license_key):
     return stats
 
 def check_admin_auth(data):
-    """Check if user is admin or moderator"""
     username = data.get("admin_username", "")
     password = data.get("admin_password", "")
     
-    # Check master admin
     if username == MASTER_ADMIN["username"] and password == MASTER_ADMIN["password"]:
         return {"authorized": True, "role": "master", "username": username}
     
-    # Check admins
     if username in ADMINS and ADMINS[username]["password"] == password:
         return {"authorized": True, "role": "admin", "username": username, "credits": ADMINS[username]["credits"]}
     
-    # Check moderators
     if username in MODERATORS and MODERATORS[username]["password"] == password:
         return {"authorized": True, "role": "moderator", "username": username, "credits": MODERATORS[username]["credits"]}
     
     return {"authorized": False}
 
 def deduct_credits(username, amount):
-    """Deduct credits from admin/moderator account (supports decimals)"""
     if username == MASTER_ADMIN["username"]:
         return True
     
@@ -189,7 +223,6 @@ def deduct_credits(username, amount):
     return False
 
 def add_credits(username, amount):
-    """Add credits to admin/moderator account"""
     if username in ADMINS:
         ADMINS[username]["credits"] = round(ADMINS[username]["credits"] + amount, 2)
         save_data()
@@ -210,16 +243,13 @@ def get_credits(username):
     return 0
 
 def get_licenses_by_owner(owner, role):
-    """Get licenses filtered by owner"""
     if role == "master":
-        # Master sees everything
         return {
             "trials": TRIAL_LICENSES,
             "custom": CUSTOM_ACTIVATIONS,
             "permanent": PERMANENT_LICENSES
         }
     else:
-        # Filter by owner
         filtered_trials = {k: v for k, v in TRIAL_LICENSES.items() if v.get("owner") == owner}
         filtered_custom = {k: v for k, v in CUSTOM_ACTIVATIONS.items() if v.get("owner") == owner}
         filtered_permanent = {k: v for k, v in PERMANENT_LICENSES.items() if v.get("owner") == owner}
@@ -228,6 +258,25 @@ def get_licenses_by_owner(owner, role):
             "custom": filtered_custom,
             "permanent": filtered_permanent
         }
+
+def find_license_by_credentials(username, password):
+    """Find license key by username and password"""
+    # Check custom activations
+    for key, activation in CUSTOM_ACTIVATIONS.items():
+        if activation.get("username") == username and activation.get("password") == password:
+            return key, "custom", activation
+    
+    # Check trial users
+    for user, user_data in TRIAL_USERS.items():
+        if user == username and user_data.get("password") == password:
+            return user_data.get("linked_license"), "trial", TRIAL_LICENSES.get(user_data.get("linked_license"), {})
+    
+    # Check permanent licenses
+    for key, lic in PERMANENT_LICENSES.items():
+        if lic.get("username") == username and lic.get("password") == password:
+            return key, "permanent", lic
+    
+    return None, None, None
 
 # ==================================================
 # 🔍 MONITORING THREAD
@@ -262,7 +311,263 @@ monitor_thread = threading.Thread(target=monitor_expired_licenses, daemon=True)
 monitor_thread.start()
 
 # ==================================================
-# 🎨 ADMIN PANEL HTML (Separate Dashboards)
+# 🎨 USER PORTAL HTML
+# ==================================================
+USER_PORTAL_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JEPFX License Portal - Check Your License Status</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
+        body { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); min-height: 100vh; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { color: #7C3AED; font-size: 32px; }
+        .header p { color: #aaa; margin-top: 5px; }
+        
+        .card { background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border-radius: 15px; padding: 25px; margin-bottom: 20px; }
+        .card h2 { color: #7C3AED; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 10px; }
+        
+        input, select, textarea { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(0,0,0,0.3); color: white; font-size: 14px; }
+        button { background: #7C3AED; color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.3s; }
+        button:hover { background: #6D28D9; transform: translateY(-2px); }
+        
+        .status-box { background: rgba(0,0,0,0.5); border-radius: 10px; padding: 15px; margin: 15px 0; border-left: 3px solid #7C3AED; }
+        .status-active { border-left-color: #10B981; }
+        .status-expired { border-left-color: #EF4444; }
+        .status-warning { border-left-color: #F59E0B; }
+        
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .info-label { color: #aaa; }
+        .info-value { color: white; font-weight: bold; }
+        
+        .contact-buttons { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+        .contact-btn { flex: 1; text-align: center; text-decoration: none; padding: 12px; border-radius: 8px; color: white; font-weight: bold; }
+        .telegram-btn { background: #0088cc; }
+        .telegram-btn:hover { background: #006699; }
+        
+        .request-form { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2); }
+        .request-form.show { display: block; }
+        
+        .loading { text-align: center; padding: 20px; }
+        .spinner { border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid #7C3AED; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .alert-success { background: rgba(16,185,129,0.2); border: 1px solid #10B981; color: #10B981; padding: 12px; border-radius: 8px; margin: 10px 0; }
+        .alert-error { background: rgba(239,68,68,0.2); border: 1px solid #EF4444; color: #EF4444; padding: 12px; border-radius: 8px; margin: 10px 0; }
+        .alert-info { background: rgba(59,130,246,0.2); border: 1px solid #3B82F6; color: #3B82F6; padding: 12px; border-radius: 8px; margin: 10px 0; }
+        
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .badge-active { background: #10B981; color: white; }
+        .badge-expired { background: #EF4444; color: white; }
+        .badge-warning { background: #F59E0B; color: white; }
+        
+        .login-section, .status-section { transition: all 0.3s; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🔑 JEPFX License Portal</h1>
+        <p>Check your license status, request extensions, and get support</p>
+    </div>
+    
+    <!-- Login Section -->
+    <div id="loginSection" class="card">
+        <h2>🔐 License Login</h2>
+        <p>Enter your username and password to check your license status</p>
+        <input type="text" id="loginUsername" placeholder="Username">
+        <input type="password" id="loginPassword" placeholder="Password">
+        <button onclick="checkLicense()">CHECK LICENSE STATUS</button>
+        <div id="loginError" class="alert-error" style="display: none; margin-top: 10px;"></div>
+    </div>
+    
+    <!-- Status Section (Hidden initially) -->
+    <div id="statusSection" class="card hidden">
+        <div id="statusContent"></div>
+        
+        <!-- Request Form -->
+        <div id="requestForm" class="request-form">
+            <h3>📨 Request Extension / Reactivation</h3>
+            <select id="requestType">
+                <option value="extension">Extension (Add more days)</option>
+                <option value="reactivation">Reactivation (Reset HWID)</option>
+                <option value="reset">Reset Usage Credits</option>
+                <option value="other">Other Request</option>
+            </select>
+            <input type="text" id="requestDays" placeholder="Days to add (if extension)" value="7">
+            <textarea id="requestMessage" rows="3" placeholder="Describe your request or issue..."></textarea>
+            <input type="text" id="contactInfo" placeholder="Your contact (Telegram/Discord/Email)" value="t.me/">
+            <button onclick="submitRequest()">SUBMIT REQUEST</button>
+            <div id="requestResult" class="alert-info" style="display: none; margin-top: 10px;"></div>
+        </div>
+        
+        <!-- Contact Section -->
+        <div class="contact-buttons">
+            <a href="https://{{ telegram_contact }}" target="_blank" class="contact-btn telegram-btn">📱 Contact on Telegram</a>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentLicenseKey = null;
+    let currentLicenseType = null;
+    
+    async function checkLicense() {
+        const username = document.getElementById('loginUsername').value;
+        const password = document.getElementById('loginPassword').value;
+        
+        if(!username || !password) {
+            showError('Please enter username and password');
+            return;
+        }
+        
+        showLoading();
+        
+        const res = await fetch('/api/user/check-license', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username: username, password: password})
+        });
+        
+        const data = await res.json();
+        hideLoading();
+        
+        if(data.success) {
+            currentLicenseKey = data.license_key;
+            currentLicenseType = data.license_type;
+            displayLicenseStatus(data);
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('statusSection').classList.remove('hidden');
+        } else {
+            showError(data.error || 'Invalid credentials or license not found');
+        }
+    }
+    
+    function displayLicenseStatus(data) {
+        const statusClass = data.is_expired ? 'status-expired' : (data.days_left < 3 ? 'status-warning' : 'status-active');
+        const badgeClass = data.is_expired ? 'badge-expired' : (data.days_left < 3 ? 'badge-warning' : 'badge-active');
+        const statusText = data.is_expired ? 'EXPIRED' : (data.days_left < 3 ? 'EXPIRING SOON' : 'ACTIVE');
+        
+        let hwidHtml = '';
+        if(data.hwids && data.hwids.length > 0) {
+            hwidHtml = '<div class="info-row"><span class="info-label">🖥️ Activated Devices:</span><span class="info-value">' + data.hwids.length + ' device(s)</span></div>';
+            hwidHtml += '<div class="info-row"><span class="info-label">📱 HWIDs:</span><span class="info-value" style="font-size: 11px;">' + data.hwids.join('<br>') + '</span></div>';
+        }
+        
+        const html = `
+            <div class="status-box ${statusClass}">
+                <div class="info-row">
+                    <span class="info-label">🔑 License Key:</span>
+                    <span class="info-value"><code>${data.license_key}</code></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">👤 Username:</span>
+                    <span class="info-value">${data.username}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">📋 License Type:</span>
+                    <span class="info-value">${data.license_type}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">📅 Expires:</span>
+                    <span class="info-value">${data.expires_at || 'NEVER'}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">⏰ Status:</span>
+                    <span class="info-value"><span class="badge ${badgeClass}">${statusText}</span></span>
+                </div>
+                ${data.days_left !== null ? `<div class="info-row"><span class="info-label">📆 Days Left:</span><span class="info-value">${data.days_left} days</span></div>` : ''}
+                ${data.usage_count !== undefined ? `<div class="info-row"><span class="info-label">📊 Total API Calls:</span><span class="info-value">${data.usage_count}</span></div>` : ''}
+                ${hwidHtml}
+                ${data.created_at ? `<div class="info-row"><span class="info-label">📅 Created:</span><span class="info-value">${new Date(data.created_at).toLocaleString()}</span></div>` : ''}
+                ${data.last_used ? `<div class="info-row"><span class="info-label">🕐 Last Used:</span><span class="info-value">${new Date(data.last_used).toLocaleString()}</span></div>` : ''}
+            </div>
+            ${data.is_expired ? '<div class="alert-warning" style="background: rgba(239,68,68,0.2); border: 1px solid #EF4444; padding: 10px; border-radius: 8px; margin: 10px 0;">⚠️ Your license has expired. Submit a request below for reactivation.</div>' : ''}
+            ${!data.is_expired && data.days_left < 7 ? '<div class="alert-warning" style="background: rgba(245,158,11,0.2); border: 1px solid #F59E0B; padding: 10px; border-radius: 8px; margin: 10px 0;">⚠️ Your license is expiring soon! Submit a request to extend.</div>' : ''}
+        `;
+        
+        document.getElementById('statusContent').innerHTML = html;
+        document.getElementById('requestForm').classList.add('show');
+    }
+    
+    async function submitRequest() {
+        const requestType = document.getElementById('requestType').value;
+        const requestDays = document.getElementById('requestDays').value;
+        const requestMessage = document.getElementById('requestMessage').value;
+        const contactInfo = document.getElementById('contactInfo').value;
+        
+        if(!requestMessage) {
+            alert('Please describe your request');
+            return;
+        }
+        
+        const res = await fetch('/api/user/submit-request', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                license_key: currentLicenseKey,
+                username: document.getElementById('loginUsername').value,
+                request_type: requestType,
+                days_requested: parseInt(requestDays) || 0,
+                message: requestMessage,
+                contact: contactInfo
+            })
+        });
+        
+        const data = await res.json();
+        const resultDiv = document.getElementById('requestResult');
+        
+        if(data.success) {
+            resultDiv.className = 'alert-success';
+            resultDiv.innerHTML = '✅ Request submitted successfully! Admin will review and contact you soon.';
+            resultDiv.style.display = 'block';
+            
+            // Clear form
+            document.getElementById('requestMessage').value = '';
+            
+            // Hide after 5 seconds
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+            }, 5000);
+        } else {
+            resultDiv.className = 'alert-error';
+            resultDiv.innerHTML = '❌ Error: ' + data.error;
+            resultDiv.style.display = 'block';
+        }
+    }
+    
+    function showError(msg) {
+        const errorDiv = document.getElementById('loginError');
+        errorDiv.innerHTML = msg;
+        errorDiv.style.display = 'block';
+        setTimeout(() => {
+            errorDiv.style.display = 'none';
+        }, 5000);
+    }
+    
+    function showLoading() {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.innerHTML = '<div class="spinner" style="width: 20px; height: 20px;"></div> Checking...';
+    }
+    
+    function hideLoading() {
+        const btn = event.target;
+        btn.disabled = false;
+        btn.innerHTML = 'CHECK LICENSE STATUS';
+    }
+</script>
+</body>
+</html>
+"""
+
+# ==================================================
+# 🎨 ADMIN PANEL HTML (Combined with Requests Tab)
 # ==================================================
 ADMIN_HTML = """
 <!DOCTYPE html>
@@ -296,6 +601,7 @@ ADMIN_HTML = """
         button { background: #7C3AED; color: white; padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; margin: 5px; }
         .btn-danger { background: #DC2626; }
         .btn-success { background: #10B981; }
+        .btn-warning { background: #F59E0B; }
         
         table { width: 100%; border-collapse: collapse; margin-top: 20px; display: block; overflow-x: auto; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
@@ -306,9 +612,16 @@ ADMIN_HTML = """
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); }
         .modal-content { background: #1a1a2e; margin: 5% auto; padding: 25px; border-radius: 15px; width: 90%; max-width: 600px; }
         .close { float: right; font-size: 28px; cursor: pointer; }
-        .credit-badge { background: #10B981; padding: 5px 10px; border-radius: 20px; font-size: 12px; margin-left: 10px; }
         .master-only { background: rgba(239,68,68,0.2); border-left: 3px solid #EF4444; padding: 10px; margin: 10px 0; border-radius: 5px; }
-        .owner-tag { font-size: 11px; color: #aaa; margin-left: 5px; }
+        .copy-btn { background: #3B82F6; padding: 2px 8px; border-radius: 5px; font-size: 11px; margin-left: 5px; cursor: pointer; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin: 2px; }
+        .badge-pending { background: #F59E0B; }
+        .badge-approved { background: #10B981; }
+        .badge-rejected { background: #EF4444; }
+        
+        .request-card { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; margin: 10px 0; }
+        .request-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .request-status { font-size: 12px; padding: 2px 8px; border-radius: 12px; }
     </style>
 </head>
 <body>
@@ -327,21 +640,23 @@ ADMIN_HTML = """
         <div class="header">
             <h1>⚡ JEPFX ADMIN PANEL</h1>
             <p>Welcome, <span id="currentUser">-</span> | Role: <span id="currentRole">-</span> | Credits: <span id="currentCredits">0</span></p>
-            <div id="masterBadge" style="display: none;" class="master-only">👑 Master Admin - You can see all licenses from all admins</div>
+            <div id="masterBadge" style="display: none;" class="master-only">👑 Master Admin - Full access to everything</div>
         </div>
         
-        <div class="stats-grid" id="statsGrid">
+        <div class="stats-grid">
             <div class="stat-card"><div class="stat-number" id="statTrials">0</div><div>My Trials</div></div>
             <div class="stat-card"><div class="stat-number" id="statCustom">0</div><div>My Custom</div></div>
             <div class="stat-card"><div class="stat-number" id="statPermanent">0</div><div>My Permanent</div></div>
-            <div class="stat-card"><div class="stat-number" id="statUsage">0</div><div>API Calls</div></div>
+            <div class="stat-card"><div class="stat-number" id="statRequests">0</div><div>Pending Requests</div></div>
         </div>
         
         <div class="tabs">
             <button class="tab active" onclick="switchTab('generateTrial')">🎲 CREATE TRIAL</button>
-            <button class="tab" onclick="switchTab('customActivation')">✨ CUSTOM ACTIVATOR</button>
+            <button class="tab" onclick="switchTab('customActivation')">✨ CUSTOM</button>
             <button class="tab" onclick="switchTab('permanentLicense')">🔑 PERMANENT</button>
             <button class="tab" onclick="switchTab('myLicenses')">📋 MY LICENSES</button>
+            <button class="tab" onclick="switchTab('userRequests')">📨 USER REQUESTS</button>
+            <button class="tab" onclick="switchTab('history')">📜 HISTORY</button>
             <div id="adminTab" style="display: none;"><button class="tab" onclick="switchTab('admins')">👨‍💼 MANAGE ADMINS</button></div>
             <button class="tab" onclick="switchTab('changePassword')">🔐 CHANGE PASSWORD</button>
             <button class="tab" onclick="switchTab('monitor')">📈 MONITOR</button>
@@ -360,18 +675,15 @@ ADMIN_HTML = """
                 <option value="720">1 Month (10 credits)</option>
             </select>
             <button onclick="generateTrial()">GENERATE LICENSE</button>
-            <div class="result-box" style="margin-top: 10px; font-size: 12px;">
-                💡 <strong>Pricing:</strong> 0.1 credits/hour • Max 10 credits/month
-            </div>
             <div id="trialResult" class="result-box" style="display: none;"></div>
         </div>
         
         <!-- Tab: Custom Activation -->
         <div id="customActivation" class="content">
-            <h2>✨ Custom Activation (Multi-PC Supported)</h2>
-            <input type="text" id="customUsername" placeholder="Username">
-            <input type="text" id="customPassword" placeholder="Password">
-            <input type="text" id="customLicense" placeholder="License Key">
+            <h2>✨ Custom Activation (Multi-PC)</h2>
+            <input type="text" id="customUsername" placeholder="Username *">
+            <input type="text" id="customPassword" placeholder="Password *">
+            <input type="text" id="customLicense" placeholder="License Key *">
             <select id="customDurationType">
                 <option value="hours">Hours (0.1 credits/hour)</option>
                 <option value="days">Days (1 credit/day)</option>
@@ -382,55 +694,67 @@ ADMIN_HTML = """
             </select>
             <input type="number" id="customDurationValue" placeholder="Duration value" step="0.5">
             <button onclick="createCustomActivation()">CREATE ACTIVATION</button>
-            <div class="result-box" style="margin-top: 10px; font-size: 12px;">
-                💡 <strong>Pricing:</strong> Hour:0.1 | Day:1 | Week:5 | Month:10 | Year:30 | Unlimited:50<br>
-                🎮 <strong>Multi-PC:</strong> Supports unlimited devices simultaneously!
-            </div>
             <div id="customResult" class="result-box" style="display: none;"></div>
         </div>
         
         <!-- Tab: Permanent License -->
         <div id="permanentLicense" class="content">
             <h2>🔑 Permanent License (50 Credits)</h2>
-            <input type="text" id="permLicenseKey" placeholder="License Key">
+            <input type="text" id="permLicenseKey" placeholder="License Key *">
             <input type="text" id="permUsername" placeholder="Username (optional)">
             <input type="text" id="permPassword" placeholder="Password (optional)">
-            <button onclick="createPermanentLicense()">CREATE PERMANENT (50 CREDITS)</button>
-            <div class="result-box" style="margin-top: 10px; font-size: 12px;">
-                💡 Permanent license never expires and supports unlimited devices!
-            </div>
+            <button onclick="createPermanentLicense()">CREATE PERMANENT</button>
             <div id="permResult" class="result-box" style="display: none;"></div>
         </div>
         
-        <!-- Tab: My Licenses (Shows only licenses created by this admin) -->
+        <!-- Tab: My Licenses -->
         <div id="myLicenses" class="content">
-            <h2>📋 My Created Licenses</h2>
-            <div class="tabs" style="margin-bottom: 10px;">
-                <button class="tab" onclick="showLicenseType('trials')">Trial Licenses</button>
-                <button class="tab" onclick="showLicenseType('custom')">Custom Activations</button>
-                <button class="tab" onclick="showLicenseType('permanent')">Permanent Licenses</button>
+            <h2>📋 My Active Licenses</h2>
+            <div style="margin-bottom: 10px;">
+                <button onclick="showLicenseType('trials')">Trial Licenses</button>
+                <button onclick="showLicenseType('custom')">Custom Activations</button>
+                <button onclick="showLicenseType('permanent')">Permanent Licenses</button>
             </div>
             <div id="myTrialsList"></div>
             <div id="myCustomList" style="display: none;"></div>
             <div id="myPermanentList" style="display: none;"></div>
         </div>
         
-        <!-- Tab: Admins Management (Master Only) -->
+        <!-- Tab: User Requests -->
+        <div id="userRequests" class="content">
+            <h2>📨 User Requests (Extension/Reactivation)</h2>
+            <p>Users can request license extensions or reactivations from the user portal.</p>
+            <button onclick="loadUserRequests()">REFRESH</button>
+            <div id="requestsList"></div>
+        </div>
+        
+        <!-- Tab: License History -->
+        <div id="history" class="content">
+            <h2>📜 Complete License History</h2>
+            <input type="text" id="historySearch" placeholder="Search by license key, username..." onkeyup="filterHistory()" style="width: 100%; margin: 10px 0;">
+            <button onclick="loadHistory()">REFRESH</button>
+            <button onclick="exportHistory()">📥 EXPORT TO CSV</button>
+            <div id="historyList"></div>
+        </div>
+        
+        <!-- Tab: Admins Management -->
         <div id="admins" class="content">
-            <div class="master-only">
-                <h2>👑 MASTER ADMIN ONLY</h2>
-                <p>You have access to all licenses and can manage other admins</p>
-            </div>
+            <div class="master-only"><h2>👑 MASTER ADMIN CONTROL</h2></div>
             
             <h3>➕ Add New Admin/Moderator</h3>
             <input type="text" id="newAdminUser" placeholder="Username">
             <input type="password" id="newAdminPass" placeholder="Password">
             <select id="newAdminRole">
-                <option value="admin">Admin (Can create licenses, uses credits)</option>
-                <option value="moderator">Moderator (Limited access, uses credits)</option>
+                <option value="admin">Admin</option>
+                <option value="moderator">Moderator</option>
             </select>
             <input type="number" id="newAdminCredits" placeholder="Initial Credits" value="100" step="0.5">
             <button onclick="addAdmin()">ADD USER</button>
+            
+            <h3>🔑 Change Admin/Moderator Password</h3>
+            <input type="text" id="targetUsername" placeholder="Username to change password">
+            <input type="password" id="newPasswordForTarget" placeholder="New Password">
+            <button class="btn-warning" onclick="changeOtherPassword()">CHANGE PASSWORD</button>
             
             <h3>📋 All Admins</h3>
             <div id="adminsList"></div>
@@ -442,37 +766,34 @@ ADMIN_HTML = """
             <input type="text" id="creditUsername" placeholder="Username">
             <input type="number" id="creditAmount" placeholder="Amount (+ or -)" step="0.5">
             <button onclick="manageCredits()">UPDATE CREDITS</button>
-            
-            <h3>📊 All Licenses (System Wide)</h3>
-            <button onclick="loadAllLicenses()">REFRESH ALL LICENSES</button>
-            <div id="allLicensesList"></div>
         </div>
         
         <!-- Tab: Change Password -->
         <div id="changePassword" class="content">
-            <h2>🔐 Change Your Password</h2>
+            <h2>🔐 Change Your Own Password</h2>
             <input type="password" id="oldPassword" placeholder="Current Password">
             <input type="password" id="newPassword" placeholder="New Password">
             <input type="password" id="confirmPassword" placeholder="Confirm New Password">
-            <button onclick="changePassword()">UPDATE PASSWORD</button>
+            <button onclick="changePassword()">UPDATE MY PASSWORD</button>
             <div id="passwordResult" class="result-box" style="display: none;"></div>
         </div>
         
         <!-- Tab: Monitor -->
         <div id="monitor" class="content">
-            <h2>📈 My Usage Monitor</h2>
+            <h2>📈 System Monitor</h2>
             <button onclick="loadMonitor()">REFRESH</button>
             <div id="monitorData" class="result-box"></div>
         </div>
     </div>
 </div>
 
-<!-- Usage Modal -->
-<div id="usageModal" class="modal">
+<!-- Credentials Modal -->
+<div id="credsModal" class="modal">
     <div class="modal-content">
         <span class="close" onclick="closeModal()">&times;</span>
-        <h2 id="modalTitle">Usage Details</h2>
+        <h2 id="modalTitle">License Credentials</h2>
         <div id="modalBody"></div>
+        <button onclick="copyAllCredentials()" style="margin-top: 15px;">📋 Copy All</button>
     </div>
 </div>
 
@@ -508,6 +829,8 @@ ADMIN_HTML = """
             document.getElementById('mainPanel').style.display = 'block';
             loadStats();
             loadMyLicenses();
+            loadHistory();
+            loadUserRequests();
         } else {
             document.getElementById('loginError').style.display = 'block';
         }
@@ -520,10 +843,9 @@ ADMIN_HTML = """
         document.getElementById(tabId).classList.add('active');
         
         if(tabId === 'myLicenses') loadMyLicenses();
-        if(tabId === 'admins' && currentRole === 'master') {
-            loadAdmins();
-            loadAllLicenses();
-        }
+        if(tabId === 'userRequests') loadUserRequests();
+        if(tabId === 'history') loadHistory();
+        if(tabId === 'admins' && currentRole === 'master') loadAdmins();
         if(tabId === 'monitor') loadMonitor();
     }
     
@@ -548,9 +870,39 @@ ADMIN_HTML = """
             document.getElementById('statTrials').textContent = data.trials;
             document.getElementById('statCustom').textContent = data.custom;
             document.getElementById('statPermanent').textContent = data.permanent;
-            document.getElementById('statUsage').textContent = data.total_usage;
+            document.getElementById('statRequests').textContent = data.pending_requests || 0;
             document.getElementById('currentCredits').textContent = data.user_credits || 'Unlimited';
         }
+    }
+    
+    function showCredentials(licenseKey, username, password, licenseType, expiresAt) {
+        const modal = document.getElementById('credsModal');
+        document.getElementById('modalTitle').innerHTML = `🔑 License: ${licenseKey}`;
+        document.getElementById('modalBody').innerHTML = `
+            <div class="result-box">
+                <p><strong>🔑 License Key:</strong> <code style="font-size: 16px;">${licenseKey}</code> <button class="copy-btn" onclick="copyToClipboard('${licenseKey}')">Copy</button></p>
+                <p><strong>👤 Username:</strong> <code>${username}</code> <button class="copy-btn" onclick="copyToClipboard('${username}')">Copy</button></p>
+                <p><strong>🔒 Password:</strong> <code>${password}</code> <button class="copy-btn" onclick="copyToClipboard('${password}')">Copy</button></p>
+                <p><strong>📋 Type:</strong> ${licenseType}</p>
+                <p><strong>⏰ Expires:</strong> ${expiresAt || 'NEVER'}</p>
+                <hr>
+                <p><strong>💡 Save these credentials!</strong> They are stored in history permanently.</p>
+            </div>
+        `;
+        modal.style.display = 'block';
+    }
+    
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text);
+        alert('Copied: ' + text);
+    }
+    
+    function copyAllCredentials() {
+        const codeElements = document.querySelectorAll('#modalBody code');
+        let text = '';
+        codeElements.forEach(el => text += el.innerText + '\\n');
+        navigator.clipboard.writeText(text);
+        alert('All credentials copied!');
     }
     
     async function generateTrial() {
@@ -568,9 +920,11 @@ ADMIN_HTML = """
         const resultDiv = document.getElementById('trialResult');
         resultDiv.style.display = 'block';
         if(data.success) {
-            resultDiv.innerHTML = `✅ TRIAL CREATED!<br>🔑 License: ${data.license_key}<br>👤 User: ${data.username}<br>🔒 Pass: ${data.password}<br>⏱️ Duration: ${duration} hours<br>💰 Credits used: ${data.credits_used}<br>💳 Remaining: ${data.remaining_credits}`;
+            showCredentials(data.license_key, data.username, data.password, 'Trial', data.expires_at);
+            resultDiv.innerHTML = `✅ TRIAL CREATED!<br>🔑 License: ${data.license_key}<br>👤 User: ${data.username}<br>🔒 Pass: ${data.password}<br>💰 Credits used: ${data.credits_used}<br>💳 Remaining: ${data.remaining_credits}`;
             loadStats();
             loadMyLicenses();
+            loadHistory();
         } else {
             resultDiv.innerHTML = `❌ ERROR: ${data.error}`;
         }
@@ -605,13 +959,15 @@ ADMIN_HTML = """
         const resultDiv = document.getElementById('customResult');
         resultDiv.style.display = 'block';
         if(data.success) {
-            resultDiv.innerHTML = `✅ CUSTOM ACTIVATION CREATED!<br>🔑 License: ${license}<br>👤 User: ${username}<br>🔒 Pass: ${password}<br>📅 Expires: ${data.expires_at || 'NEVER'}<br>💰 Credits used: ${data.credits_used}<br>💳 Remaining: ${data.remaining_credits}<br>🎮 MULTI-PC SUPPORT: Unlimited devices!`;
+            showCredentials(license, username, password, 'Custom', data.expires_at);
+            resultDiv.innerHTML = `✅ CUSTOM ACTIVATION CREATED!<br>🔑 License: ${license}<br>👤 User: ${username}<br>🔒 Pass: ${password}<br>📅 Expires: ${data.expires_at || 'NEVER'}<br>💰 Credits used: ${data.credits_used}<br>💳 Remaining: ${data.remaining_credits}`;
             document.getElementById('customUsername').value = '';
             document.getElementById('customPassword').value = '';
             document.getElementById('customLicense').value = '';
             document.getElementById('customDurationValue').value = '';
             loadStats();
             loadMyLicenses();
+            loadHistory();
         } else {
             resultDiv.innerHTML = `❌ ERROR: ${data.error}`;
         }
@@ -642,12 +998,14 @@ ADMIN_HTML = """
         const resultDiv = document.getElementById('permResult');
         resultDiv.style.display = 'block';
         if(data.success) {
-            resultDiv.innerHTML = `✅ PERMANENT LICENSE CREATED! (50 credits)<br>🔑 License: ${license}<br>💰 Remaining Credits: ${data.remaining_credits}<br>🎮 Supports unlimited devices!`;
+            showCredentials(license, username || 'N/A', password || 'N/A', 'Permanent', 'Never');
+            resultDiv.innerHTML = `✅ PERMANENT LICENSE CREATED!<br>🔑 License: ${license}<br>💰 Remaining Credits: ${data.remaining_credits}`;
             document.getElementById('permLicenseKey').value = '';
             document.getElementById('permUsername').value = '';
             document.getElementById('permPassword').value = '';
             loadStats();
             loadMyLicenses();
+            loadHistory();
         } else {
             resultDiv.innerHTML = `❌ ERROR: ${data.error}`;
         }
@@ -666,17 +1024,17 @@ ADMIN_HTML = """
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>License Key</th><th>Duration</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
+        let html = '<table></table><th>License Key</th><th>Duration</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.trials.forEach(trial => {
-            html += `<tr onclick="showUsageDetails('${trial.license_key}')">
-                        <td>${trial.license_key}</td>
+            html += `<tr>
+                        <td>${trial.license_key} <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${trial.license_key}')">Copy</button></td>
                         <td>${trial.duration_hours}</td>
-                        <td>${trial.hwid_count || 0} device(s)</td>
+                        <td>${trial.hwid_count || 0}</td>
                         <td>${trial.expires_at || '-'}</td>
                         <td>${trial.status}</td>
                         <td>${trial.usage_count || 0}</td>
-                        <td><button class="btn-danger" onclick="event.stopPropagation(); deleteTrial('${trial.license_key}')">Delete</button></td>
-                     </tr>`;
+                        <td><button class="btn-danger" onclick="deleteTrial('${trial.license_key}')">Delete</button></td>
+                    </tr>`;
         });
         html += '</table>';
         document.getElementById('myTrialsList').innerHTML = html;
@@ -689,18 +1047,18 @@ ADMIN_HTML = """
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>License Key</th><th>Username</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
+        let html = '<table> <tr><th>License Key</th><th>Username</th><th>Password</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.activations.forEach(act => {
-            const hwidList = act.hwids || [];
-            html += `<tr onclick="showUsageDetails('${act.license_key}')">
-                        <td>${act.license_key}</td>
-                        <td>${act.username}</td>
-                        <td>${hwidList.length} device(s)</td>
+            html += `<tr>
+                        <td>${act.license_key} <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${act.license_key}')">Copy</button></td>
+                        <td>${act.username} <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${act.username}')">Copy</button></td>
+                        <td>${act.password} <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${act.password}')">Copy</button></td>
+                        <td>${act.hwids ? act.hwids.length : 0}</td>
                         <td>${act.expires_at || 'NEVER'}</td>
                         <td class="${act.status === 'ACTIVE' ? 'success' : 'warning'}">${act.status}</td>
                         <td>${act.usage_count || 0}</td>
-                        <td><button class="btn-danger" onclick="event.stopPropagation(); deleteCustomActivation('${act.license_key}')">Delete</button></td>
-                     </tr>`;
+                        <td><button class="btn-danger" onclick="deleteCustomActivation('${act.license_key}')">Delete</button></td>
+                    </tr>`;
         });
         html += '</table>';
         document.getElementById('myCustomList').innerHTML = html;
@@ -713,21 +1071,133 @@ ADMIN_HTML = """
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<tr><tr><th>License Key</th><th>Username</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
+        let html = '<table><tr><th>License Key</th><th>Username</th><th>HWIDs</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.licenses.forEach(lic => {
-            const hwidList = lic.hwids || [];
-            html += `<tr onclick="showUsageDetails('${lic.license_key}')">
-                        <td>${lic.license_key}</td>
+            html += `<tr>
+                        <td>${lic.license_key} <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${lic.license_key}')">Copy</button></td>
                         <td>${lic.username || '-'}</td>
-                        <td>${hwidList.length} device(s)</td>
-                        <td>${lic.expires_at || 'UNLIMITED'}</td>
+                        <td>${lic.hwids ? lic.hwids.length : 0}</td>
                         <td>${lic.status}</td>
                         <td>${lic.usage_count || 0}</td>
-                        <td><button class="btn-danger" onclick="event.stopPropagation(); deletePermanentLicense('${lic.license_key}')">Delete</button></td>
-                     </tr>`;
+                        <td><button class="btn-danger" onclick="deletePermanentLicense('${lic.license_key}')">Delete</button></td>
+                    </tr>`;
+        });
+        html += '</tr>';
+        document.getElementById('myPermanentList').innerHTML = html;
+    }
+    
+    async function loadUserRequests() {
+        const res = await fetch(API_URL + '/api/admin/get-requests', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
+        });
+        const data = await res.json();
+        
+        let html = '<td><th>Date</th><th>License Key</th><th>Username</th><th>Request Type</th><th>Message</th><th>Contact</th><th>Status</th><th>Action</th></tr>';
+        data.requests.forEach((req, index) => {
+            const statusClass = req.status === 'pending' ? 'badge-pending' : (req.status === 'approved' ? 'badge-approved' : 'badge-rejected');
+            html += `<tr>
+                <td style="font-size: 12px;">${new Date(req.created_at).toLocaleString()}</td>
+                <td><code>${req.license_key}</code></td>
+                <td>${req.username}</td>
+                <td>${req.request_type}</td>
+                <td style="max-width: 200px;">${req.message.substring(0, 100)}...</td>
+                <td>${req.contact || '-'}</td>
+                <td><span class="badge ${statusClass}">${req.status}</span></td>
+                <td>
+                    ${req.status === 'pending' ? `<button class="btn-success" onclick="approveRequest(${index}, '${req.license_key}', '${req.request_type}', ${req.days_requested || 0})">Approve</button>
+                    <button class="btn-danger" onclick="rejectRequest(${index})">Reject</button>` : '-'}
+                </td>
+            </tr>`;
         });
         html += '</table>';
-        document.getElementById('myPermanentList').innerHTML = html;
+        document.getElementById('requestsList').innerHTML = html || '<p>No requests found</p>';
+    }
+    
+    async function approveRequest(reqIndex, licenseKey, requestType, days) {
+        if(!confirm(`Approve request for ${licenseKey}?`)) return;
+        
+        const res = await fetch(API_URL + '/api/admin/approve-request', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                admin_username: currentUser,
+                admin_password: document.getElementById('loginPassword').value,
+                request_index: reqIndex,
+                license_key: licenseKey,
+                request_type: requestType,
+                days_to_add: days
+            })
+        });
+        const data = await res.json();
+        if(data.success) {
+            alert('Request approved! License extended/reactivated.');
+            loadUserRequests();
+            loadStats();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    }
+    
+    async function rejectRequest(reqIndex) {
+        if(!confirm('Reject this request?')) return;
+        
+        const res = await fetch(API_URL + '/api/admin/reject-request', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                admin_username: currentUser,
+                admin_password: document.getElementById('loginPassword').value,
+                request_index: reqIndex
+            })
+        });
+        const data = await res.json();
+        if(data.success) {
+            alert('Request rejected.');
+            loadUserRequests();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    }
+    
+    async function loadHistory() {
+        const res = await fetch(API_URL + '/api/admin/get-history', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
+        });
+        const data = await res.json();
+        let html = `<tr><th>Created</th><th>License Key</th><th>Username</th><th>Password</th><th>Type</th><th>Owner</th><th>Expires</th><th>Action</th></tr>`;
+        data.history.forEach(item => {
+            const created = new Date(item.created_at).toLocaleString();
+            html += `<tr>
+                <td style="font-size: 12px;">${created}</td>
+                <td><strong>${item.license_key}</strong> <button class="copy-btn" onclick="copyToClipboard('${item.license_key}')">Copy</button></td>
+                <td>${item.username} <button class="copy-btn" onclick="copyToClipboard('${item.username}')">Copy</button></td>
+                <td>${item.password} <button class="copy-btn" onclick="copyToClipboard('${item.password}')">Copy</button></td>
+                <td><span class="badge badge-${item.type.toLowerCase()}">${item.type}</span></td>
+                <td>${item.owner}</td>
+                <td>${item.expires_at || 'NEVER'}</td>
+                <td><button onclick="showCredentials('${item.license_key}', '${item.username}', '${item.password}', '${item.type}', '${item.expires_at}')">View</button></td>
+            </tr>`;
+        });
+        html += '</table>';
+        document.getElementById('historyList').innerHTML = html;
+    }
+    
+    function filterHistory() {
+        const search = document.getElementById('historySearch').value.toLowerCase();
+        const rows = document.querySelectorAll('#historyList tr');
+        rows.forEach((row, index) => {
+            if(index === 0) return;
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(search) ? '' : 'none';
+        });
+    }
+    
+    async function exportHistory() {
+        window.open(API_URL + '/api/admin/export-history?admin_username=' + currentUser + '&admin_password=' + document.getElementById('loginPassword').value);
     }
     
     async function loadAdmins() {
@@ -738,53 +1208,48 @@ ADMIN_HTML = """
         });
         const data = await res.json();
         
-        let adminsHtml = '<tr> hilab<th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
+        let adminsHtml = '<table><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
         data.admins.forEach(admin => {
-            adminsHtml += `<tr>
-                <td>${admin.username}</td>
-                <td>${admin.credits}</td>
-                <td>${admin.created_at || '-'}</td>
-                <td><button class="btn-danger" onclick="deleteAdmin('${admin.username}')">Delete</button></td>
-            </tr>`;
+            adminsHtml += `<tr><td>${admin.username}</td><td>${admin.credits}</td><td>${admin.created_at || '-'}</td><td><button class="btn-danger" onclick="deleteAdmin('${admin.username}')">Delete</button></td></tr>`;
         });
         adminsHtml += '</table>';
         document.getElementById('adminsList').innerHTML = adminsHtml;
         
         let modsHtml = '<table><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
         data.moderators.forEach(mod => {
-            modsHtml += `<tr>
-                <td>${mod.username}</td>
-                <td>${mod.credits}</td>
-                <td>${mod.created_at || '-'}</td>
-                <td><button class="btn-danger" onclick="deleteModerator('${mod.username}')">Delete</button></td>
-             </tr>`;
+            modsHtml += `<tr><td>${mod.username}</td><td>${mod.credits}</td><td>${mod.created_at || '-'}</td><td><button class="btn-danger" onclick="deleteModerator('${mod.username}')">Delete</button></td></tr>`;
         });
         modsHtml += '</table>';
         document.getElementById('moderatorsList').innerHTML = modsHtml;
     }
     
-    async function loadAllLicenses() {
-        const res = await fetch(API_URL + '/api/admin/get-all-licenses', {
+    async function changeOtherPassword() {
+        const targetUser = document.getElementById('targetUsername').value;
+        const newPass = document.getElementById('newPasswordForTarget').value;
+        
+        if(!targetUser || !newPass) {
+            alert('Username and new password required!');
+            return;
+        }
+        
+        const res = await fetch(API_URL + '/api/admin/change-other-password', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
+            body: JSON.stringify({
+                admin_username: currentUser,
+                admin_password: document.getElementById('loginPassword').value,
+                target_username: targetUser,
+                new_password: newPass
+            })
         });
         const data = await res.json();
-        
-        let html = '<h4>All Trial Licenses</h4><table><tr><th>License Key</th><th>Owner</th><th>HWIDs</th><th>Expires</th><th>Status</th></tr>';
-        data.all_trials.forEach(trial => {
-            html += `<tr><td>${trial.license_key}</td><td>${trial.owner || 'Unknown'}</td><td>${trial.hwid_count}</td><td>${trial.expires_at || '-'}</td><td>${trial.status}</td></tr>`;
-        });
-        html += '</table><h4>All Custom Activations</h4><table><tr><th>License Key</th><th>Owner</th><th>Username</th><th>HWIDs</th><th>Expires</th></tr>';
-        data.all_custom.forEach(custom => {
-            html += `<tr><td>${custom.license_key}</td><td>${custom.owner || 'Unknown'}</td><td>${custom.username}</td><td>${custom.hwid_count}</td><td>${custom.expires_at || 'NEVER'}</td></tr>`;
-        });
-        html += '</table><h4>All Permanent Licenses</h4><table><tr><th>License Key</th><th>Owner</th><th>Username</th><th>HWIDs</th></tr>';
-        data.all_permanent.forEach(perm => {
-            html += `<tr><td>${perm.license_key}</td><td>${perm.owner || 'Unknown'}</td><td>${perm.username || '-'}</td><td>${perm.hwid_count}</td></tr>`;
-        });
-        html += '</table>';
-        document.getElementById('allLicensesList').innerHTML = html;
+        if(data.success) {
+            alert(`Password changed for ${targetUser}!`);
+            document.getElementById('targetUsername').value = '';
+            document.getElementById('newPasswordForTarget').value = '';
+        } else {
+            alert('Error: ' + data.error);
+        }
     }
     
     async function addAdmin() {
@@ -874,36 +1339,23 @@ ADMIN_HTML = """
         }
     }
     
-    async function deleteAdmin(username) {
-        if(!confirm(`Delete admin ${username}?`)) return;
-        const res = await fetch(API_URL + '/api/admin/delete-admin', {
+    async function loadMonitor() {
+        const res = await fetch(API_URL + '/api/admin/get-monitor-data', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                admin_username: currentUser,
-                admin_password: document.getElementById('loginPassword').value,
-                target_username: username,
-                role: 'admin'
-            })
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        if(data.success) loadAdmins();
-    }
-    
-    async function deleteModerator(username) {
-        if(!confirm(`Delete moderator ${username}?`)) return;
-        const res = await fetch(API_URL + '/api/admin/delete-admin', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                admin_username: currentUser,
-                admin_password: document.getElementById('loginPassword').value,
-                target_username: username,
-                role: 'moderator'
-            })
-        });
-        const data = await res.json();
-        if(data.success) loadAdmins();
+        document.getElementById('monitorData').innerHTML = `
+            📊 SYSTEM STATUS<br><br>
+            🔹 My Trials: ${data.my_trials}<br>
+            🔹 My Custom: ${data.my_custom}<br>
+            🔹 My Permanent: ${data.my_permanent}<br>
+            🔹 Total History: ${data.history_count}<br>
+            🔹 Pending Requests: ${data.pending_requests}<br>
+            🔹 Active Users: ${data.active_users}<br><br>
+            ⏰ Server Time: ${data.server_time}
+        `;
     }
     
     async function deleteTrial(key) {
@@ -939,48 +1391,38 @@ ADMIN_HTML = """
         loadStats();
     }
     
-    async function showUsageDetails(licenseKey) {
-        const res = await fetch(API_URL + '/api/admin/get-license-usage', {
+    async function deleteAdmin(username) {
+        if(!confirm(`Delete admin ${username}?`)) return;
+        const res = await fetch(API_URL + '/api/admin/delete-admin', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, license_key: licenseKey})
+            body: JSON.stringify({
+                admin_username: currentUser,
+                admin_password: document.getElementById('loginPassword').value,
+                target_username: username,
+                role: 'admin'
+            })
         });
-        const data = await res.json();
-        
-        document.getElementById('modalTitle').innerHTML = `📊 Usage: ${licenseKey}`;
-        document.getElementById('modalBody').innerHTML = `
-            <div class="stats-grid">
-                <div class="stat-card"><div class="stat-number">${data.total_usage}</div><div>Total Calls</div></div>
-                <div class="stat-card"><div class="stat-number">${data.activations}</div><div>Activations</div></div>
-                <div class="stat-card"><div class="stat-number">${data.verifications}</div><div>Verifications</div></div>
-                <div class="stat-card"><div class="stat-number">${data.unique_hwids}</div><div>Unique PCs</div></div>
-            </div>
-            <p><strong>Last Used:</strong> ${data.last_used || 'Never'}</p>
-            <div class="result-box"><strong>HWIDs:</strong><br>${data.hwid_list.map(h => '• ' + h).join('<br>') || 'None'}</div>
-        `;
-        document.getElementById('usageModal').style.display = 'block';
+        if(res.ok) loadAdmins();
     }
     
-    async function loadMonitor() {
-        const res = await fetch(API_URL + '/api/admin/get-monitor-data', {
+    async function deleteModerator(username) {
+        if(!confirm(`Delete moderator ${username}?`)) return;
+        const res = await fetch(API_URL + '/api/admin/delete-admin', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
+            body: JSON.stringify({
+                admin_username: currentUser,
+                admin_password: document.getElementById('loginPassword').value,
+                target_username: username,
+                role: 'moderator'
+            })
         });
-        const data = await res.json();
-        document.getElementById('monitorData').innerHTML = `
-            📊 MY USAGE STATISTICS<br><br>
-            🔹 My Trial Licenses: ${data.my_trials}<br>
-            🔹 My Custom Activations: ${data.my_custom}<br>
-            🔹 My Permanent Licenses: ${data.my_permanent}<br>
-            🔹 Total API Calls from my licenses: ${data.my_api_calls}<br>
-            🔹 Active Users (HWIDs): ${data.active_users}<br><br>
-            ⏰ Server Time: ${data.server_time}
-        `;
+        if(res.ok) loadAdmins();
     }
     
     function closeModal() {
-        document.getElementById('usageModal').style.display = 'none';
+        document.getElementById('credsModal').style.display = 'none';
     }
     
     setInterval(() => {
@@ -994,7 +1436,7 @@ ADMIN_HTML = """
 """
 
 # ==================================================
-# 🔐 API ENDPOINTS (With Owner Tracking)
+# 🔐 API ENDPOINTS
 # ==================================================
 
 @app.route('/api/admin/login', methods=['POST'])
@@ -1042,6 +1484,31 @@ def change_password():
     
     return jsonify({"success": False, "error": "User not found"}), 404
 
+@app.route('/api/admin/change-other-password', methods=['POST'])
+def change_other_password():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"] or auth["role"] != "master":
+        return jsonify({"success": False, "error": "Only master admin can change other passwords"}), 401
+    
+    target_username = data.get("target_username", "")
+    new_password = data.get("new_password", "")
+    
+    if not target_username or not new_password:
+        return jsonify({"success": False, "error": "Username and new password required"}), 400
+    
+    if target_username in ADMINS:
+        ADMINS[target_username]["password"] = new_password
+        save_data()
+        return jsonify({"success": True}), 200
+    
+    if target_username in MODERATORS:
+        MODERATORS[target_username]["password"] = new_password
+        save_data()
+        return jsonify({"success": True}), 200
+    
+    return jsonify({"success": False, "error": "User not found"}), 404
+
 @app.route('/api/admin/get-stats', methods=['POST'])
 def get_stats():
     data = request.get_json()
@@ -1050,21 +1517,16 @@ def get_stats():
         return jsonify({"success": False, "error": "Unauthorized"}), 401
     
     licenses = get_licenses_by_owner(auth["username"], auth["role"])
-    
-    total_usage = 0
-    for key in licenses["trials"]:
-        total_usage += len(USAGE_LOGS.get(key, []))
-    for key in licenses["custom"]:
-        total_usage += len(USAGE_LOGS.get(key, []))
-    for key in licenses["permanent"]:
-        total_usage += len(USAGE_LOGS.get(key, []))
+    history = get_history_by_owner(auth["username"], auth["role"])
+    pending_requests = sum(1 for r in USER_REQUESTS if r.get("status") == "pending")
     
     return jsonify({
         "success": True,
         "trials": len(licenses["trials"]),
         "custom": len(licenses["custom"]),
         "permanent": len(licenses["permanent"]),
-        "total_usage": total_usage,
+        "history_count": len(history),
+        "pending_requests": pending_requests,
         "user_credits": auth.get("credits", "Unlimited")
     }), 200
 
@@ -1085,6 +1547,7 @@ def generate_trial():
     lic = f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
     user = f"TRIAL-{uuid.uuid4().hex[:6].upper()}"
     pwd = uuid.uuid4().hex[:10].upper()
+    expires_at = datetime.utcnow() + timedelta(hours=dur)
     
     TRIAL_LICENSES[lic] = {
         "type": "trial",
@@ -1092,12 +1555,14 @@ def generate_trial():
         "hwids": [],
         "duration_hours": dur,
         "start_time": None,
-        "expires_at": None,
+        "expires_at": expires_at.isoformat(),
         "activated_at": None
     }
     TRIAL_USERS[user] = {"password": pwd, "linked_license": lic}
-    save_data()
     
+    add_to_history(lic, user, pwd, "Trial", auth["username"], expires_at.isoformat(), {"duration_hours": dur})
+    
+    save_data()
     remaining = get_credits(auth["username"])
     
     return jsonify({
@@ -1105,7 +1570,7 @@ def generate_trial():
         "license_key": lic,
         "username": user,
         "password": pwd,
-        "duration_hours": dur,
+        "expires_at": expires_at.isoformat(),
         "credits_used": credits_cost,
         "remaining_credits": remaining
     }), 200
@@ -1165,8 +1630,12 @@ def create_custom_activation():
     }
     
     VALID_USERS[username] = password
-    save_data()
     
+    add_to_history(license_key, username, password, "Custom", auth["username"], 
+                   expires_at.isoformat() if expires_at else "UNLIMITED", 
+                   {"duration_type": duration_type, "duration_value": duration_value})
+    
+    save_data()
     remaining = get_credits(auth["username"])
     
     return jsonify({
@@ -1207,8 +1676,10 @@ def create_permanent_license():
     if username and password:
         VALID_USERS[username] = password
     
-    save_data()
+    add_to_history(license_key, username if username else "N/A", password if password else "N/A", 
+                   "Permanent", auth["username"], "NEVER", {})
     
+    save_data()
     remaining = get_credits(auth["username"])
     
     return jsonify({
@@ -1217,7 +1688,7 @@ def create_permanent_license():
     }), 200
 
 # ==================================================
-# 📋 MY LICENSES ENDPOINTS (Filtered by owner)
+# 📋 MY LICENSES ENDPOINTS
 # ==================================================
 
 @app.route('/api/admin/get-my-trials', methods=['POST'])
@@ -1277,6 +1748,7 @@ def get_my_custom():
             list_custom.append({
                 "license_key": k,
                 "username": v.get("username"),
+                "password": v.get("password"),
                 "hwids": v.get("hwids", []),
                 "expires_at": v.get("expires_at") or "UNLIMITED",
                 "status": status,
@@ -1309,56 +1781,50 @@ def get_my_permanent():
     
     return jsonify({"licenses": list_permanent}), 200
 
-@app.route('/api/admin/get-all-licenses', methods=['POST'])
-def get_all_licenses():
+@app.route('/api/admin/get-history', methods=['POST'])
+def get_history():
     data = request.get_json()
     auth = check_admin_auth(data)
-    if not auth["authorized"] or auth["role"] != "master":
+    if not auth["authorized"]:
         return jsonify({"success": False, "error": "Unauthorized"}), 401
     
-    now = datetime.utcnow()
-    all_trials = []
-    for k, v in TRIAL_LICENSES.items():
-        status = "NOT ACTIVATED"
-        if v.get("expires_at"):
-            exp = datetime.fromisoformat(v["expires_at"])
-            if exp > now:
-                status = "ACTIVE"
-            else:
-                status = "EXPIRED"
-        
-        all_trials.append({
-            "license_key": k,
-            "owner": v.get("owner", "Unknown"),
-            "hwid_count": len(v.get("hwids", [])),
-            "expires_at": v.get("expires_at") or "-",
-            "status": status
-        })
+    history = get_history_by_owner(auth["username"], auth["role"])
+    history.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     
-    all_custom = []
-    for k, v in CUSTOM_ACTIVATIONS.items():
-        all_custom.append({
-            "license_key": k,
-            "owner": v.get("owner", "Unknown"),
-            "username": v.get("username"),
-            "hwid_count": len(v.get("hwids", [])),
-            "expires_at": v.get("expires_at") or "NEVER"
-        })
+    return jsonify({"history": history}), 200
+
+@app.route('/api/admin/export-history', methods=['GET'])
+def export_history():
+    admin_username = request.args.get("admin_username")
+    admin_password = request.args.get("admin_password")
     
-    all_permanent = []
-    for k, v in PERMANENT_LICENSES.items():
-        all_permanent.append({
-            "license_key": k,
-            "owner": v.get("owner", "Unknown"),
-            "username": v.get("username"),
-            "hwid_count": len(v.get("hwids", []))
-        })
+    auth = check_admin_auth({"admin_username": admin_username, "admin_password": admin_password})
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
     
-    return jsonify({
-        "all_trials": all_trials,
-        "all_custom": all_custom,
-        "all_permanent": all_permanent
-    }), 200
+    history = get_history_by_owner(auth["username"], auth["role"])
+    
+    import csv
+    from io import StringIO
+    
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Created At', 'License Key', 'Username', 'Password', 'Type', 'Owner', 'Expires At'])
+    
+    for item in history:
+        writer.writerow([
+            item.get('created_at', ''),
+            item.get('license_key', ''),
+            item.get('username', ''),
+            item.get('password', ''),
+            item.get('type', ''),
+            item.get('owner', ''),
+            item.get('expires_at', '')
+        ])
+    
+    output.seek(0)
+    return Response(output.getvalue(), mimetype='text/csv', 
+                   headers={"Content-Disposition": "attachment;filename=license_history.csv"})
 
 @app.route('/api/admin/get-admins', methods=['POST'])
 def get_admins():
@@ -1457,14 +1923,8 @@ def get_monitor_data():
         return jsonify({"success": False, "error": "Unauthorized"}), 401
     
     licenses = get_licenses_by_owner(auth["username"], auth["role"])
-    
-    my_api_calls = 0
-    for key in licenses["trials"]:
-        my_api_calls += len(USAGE_LOGS.get(key, []))
-    for key in licenses["custom"]:
-        my_api_calls += len(USAGE_LOGS.get(key, []))
-    for key in licenses["permanent"]:
-        my_api_calls += len(USAGE_LOGS.get(key, []))
+    history = get_history_by_owner(auth["username"], auth["role"])
+    pending_requests = sum(1 for r in USER_REQUESTS if r.get("status") == "pending")
     
     active_users = set()
     for logs in USAGE_LOGS.values():
@@ -1476,7 +1936,8 @@ def get_monitor_data():
         "my_trials": len(licenses["trials"]),
         "my_custom": len(licenses["custom"]),
         "my_permanent": len(licenses["permanent"]),
-        "my_api_calls": my_api_calls,
+        "history_count": len(history),
+        "pending_requests": pending_requests,
         "active_users": len(active_users),
         "server_time": datetime.utcnow().isoformat()
     }), 200
@@ -1491,7 +1952,6 @@ def delete_trial():
     key = data.get("license_key", "")
     
     if key in TRIAL_LICENSES:
-        # Check ownership
         if auth["role"] != "master" and TRIAL_LICENSES[key].get("owner") != auth["username"]:
             return jsonify({"success": False, "error": "Not your license"}), 403
         
@@ -1539,43 +1999,205 @@ def delete_permanent_license():
         return jsonify({"success": True}), 200
     return jsonify({"success": False, "error": "Not found"}), 404
 
-@app.route('/api/admin/get-license-usage', methods=['POST'])
-def get_license_usage():
+# ==================================================
+# 👥 USER PORTAL ENDPOINTS
+# ==================================================
+
+@app.route('/user')
+def user_portal():
+    return render_template_string(USER_PORTAL_HTML.replace("{{ telegram_contact }}", TELEGRAM_CONTACT))
+
+@app.route('/api/user/check-license', methods=['POST'])
+def user_check_license():
+    data = request.get_json()
+    username = data.get("username", "")
+    password = data.get("password", "")
+    
+    license_key, license_type, license_data = find_license_by_credentials(username, password)
+    
+    if not license_key:
+        return jsonify({"success": False, "error": "Invalid username or password"}), 401
+    
+    now = datetime.utcnow()
+    expires_at = license_data.get("expires_at")
+    is_expired = False
+    days_left = None
+    
+    if expires_at and expires_at != "NEVER" and expires_at != "UNLIMITED":
+        exp_time = datetime.fromisoformat(expires_at)
+        if now > exp_time:
+            is_expired = True
+        else:
+            days_left = round((exp_time - now).days, 1)
+    
+    usage_stats = get_usage_stats(license_key)
+    
+    return jsonify({
+        "success": True,
+        "license_key": license_key,
+        "username": username,
+        "license_type": license_type,
+        "expires_at": expires_at if expires_at else "NEVER",
+        "is_expired": is_expired,
+        "days_left": days_left,
+        "hwids": license_data.get("hwids", []),
+        "usage_count": usage_stats["total_usage"],
+        "created_at": license_data.get("created_at"),
+        "last_used": usage_stats["last_used"]
+    }), 200
+
+@app.route('/api/user/submit-request', methods=['POST'])
+def user_submit_request():
+    data = request.get_json()
+    license_key = data.get("license_key", "")
+    username = data.get("username", "")
+    request_type = data.get("request_type", "extension")
+    days_requested = data.get("days_requested", 7)
+    message = data.get("message", "")
+    contact = data.get("contact", "")
+    
+    if not license_key or not username or not message:
+        return jsonify({"success": False, "error": "Missing required fields"}), 400
+    
+    # Verify the license exists and belongs to this user
+    license_key_from_user, _, _ = find_license_by_credentials(username, "")
+    # We need to verify with password too, but since we already have the license_key from login, we trust it
+    
+    USER_REQUESTS.append({
+        "license_key": license_key,
+        "username": username,
+        "request_type": request_type,
+        "days_requested": days_requested,
+        "message": message,
+        "contact": contact,
+        "status": "pending",
+        "created_at": datetime.utcnow().isoformat()
+    })
+    save_data()
+    
+    return jsonify({"success": True, "message": "Request submitted successfully"}), 200
+
+@app.route('/api/admin/get-requests', methods=['POST'])
+def admin_get_requests():
     data = request.get_json()
     auth = check_admin_auth(data)
     if not auth["authorized"]:
         return jsonify({"success": False, "error": "Unauthorized"}), 401
     
-    license_key = data.get("license_key", "")
-    
-    # Check if user has access to this license
-    has_access = False
+    # Master sees all requests, others see only requests for their licenses
     if auth["role"] == "master":
-        has_access = True
+        requests = USER_REQUESTS
     else:
-        if license_key in TRIAL_LICENSES and TRIAL_LICENSES[license_key].get("owner") == auth["username"]:
-            has_access = True
-        elif license_key in CUSTOM_ACTIVATIONS and CUSTOM_ACTIVATIONS[license_key].get("owner") == auth["username"]:
-            has_access = True
-        elif license_key in PERMANENT_LICENSES and PERMANENT_LICENSES[license_key].get("owner") == auth["username"]:
-            has_access = True
+        # Get licenses owned by this admin
+        owned_licenses = set()
+        for k in TRIAL_LICENSES:
+            if TRIAL_LICENSES[k].get("owner") == auth["username"]:
+                owned_licenses.add(k)
+        for k in CUSTOM_ACTIVATIONS:
+            if CUSTOM_ACTIVATIONS[k].get("owner") == auth["username"]:
+                owned_licenses.add(k)
+        for k in PERMANENT_LICENSES:
+            if PERMANENT_LICENSES[k].get("owner") == auth["username"]:
+                owned_licenses.add(k)
+        
+        requests = [r for r in USER_REQUESTS if r.get("license_key") in owned_licenses]
     
-    if not has_access:
+    # Sort by newest first
+    requests.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    
+    return jsonify({"requests": requests}), 200
+
+@app.route('/api/admin/approve-request', methods=['POST'])
+def admin_approve_request():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
         return jsonify({"success": False, "error": "Unauthorized"}), 401
     
-    stats = get_usage_stats(license_key)
+    req_index = data.get("request_index")
+    license_key = data.get("license_key")
+    request_type = data.get("request_type")
+    days_to_add = data.get("days_to_add", 7)
     
-    return jsonify({
-        "total_usage": stats["total_usage"],
-        "activations": stats["total_activations"],
-        "verifications": stats["total_verifications"],
-        "last_used": stats["last_used"],
-        "unique_hwids": len(stats["unique_hwids"]),
-        "hwid_list": stats["unique_hwids"]
-    }), 200
+    if req_index is None or req_index >= len(USER_REQUESTS):
+        return jsonify({"success": False, "error": "Request not found"}), 404
+    
+    req = USER_REQUESTS[req_index]
+    
+    # Check ownership
+    if auth["role"] != "master":
+        if license_key in TRIAL_LICENSES and TRIAL_LICENSES[license_key].get("owner") != auth["username"]:
+            return jsonify({"success": False, "error": "Not your license"}), 403
+        if license_key in CUSTOM_ACTIVATIONS and CUSTOM_ACTIVATIONS[license_key].get("owner") != auth["username"]:
+            return jsonify({"success": False, "error": "Not your license"}), 403
+        if license_key in PERMANENT_LICENSES and PERMANENT_LICENSES[license_key].get("owner") != auth["username"]:
+            return jsonify({"success": False, "error": "Not your license"}), 403
+    
+    # Process the request
+    now = datetime.utcnow()
+    
+    if request_type == "extension":
+        # Extend expiration date
+        if license_key in CUSTOM_ACTIVATIONS:
+            current_exp = CUSTOM_ACTIVATIONS[license_key].get("expires_at")
+            if current_exp:
+                new_exp = datetime.fromisoformat(current_exp) + timedelta(days=days_to_add)
+            else:
+                new_exp = now + timedelta(days=days_to_add)
+            CUSTOM_ACTIVATIONS[license_key]["expires_at"] = new_exp.isoformat()
+        elif license_key in TRIAL_LICENSES:
+            current_exp = TRIAL_LICENSES[license_key].get("expires_at")
+            if current_exp:
+                new_exp = datetime.fromisoformat(current_exp) + timedelta(days=days_to_add)
+            else:
+                new_exp = now + timedelta(days=days_to_add)
+            TRIAL_LICENSES[license_key]["expires_at"] = new_exp.isoformat()
+    
+    elif request_type == "reactivation":
+        # Reset HWIDs
+        if license_key in CUSTOM_ACTIVATIONS:
+            CUSTOM_ACTIVATIONS[license_key]["hwids"] = []
+            CUSTOM_ACTIVATIONS[license_key]["activated"] = False
+        elif license_key in TRIAL_LICENSES:
+            TRIAL_LICENSES[license_key]["hwids"] = []
+            TRIAL_LICENSES[license_key]["start_time"] = None
+    
+    elif request_type == "reset":
+        # Reset usage credits
+        if license_key in USAGE_LOGS:
+            USAGE_LOGS[license_key] = []
+    
+    # Mark request as approved
+    USER_REQUESTS[req_index]["status"] = "approved"
+    USER_REQUESTS[req_index]["approved_at"] = now.isoformat()
+    USER_REQUESTS[req_index]["approved_by"] = auth["username"]
+    
+    save_data()
+    
+    return jsonify({"success": True}), 200
+
+@app.route('/api/admin/reject-request', methods=['POST'])
+def admin_reject_request():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    req_index = data.get("request_index")
+    
+    if req_index is None or req_index >= len(USER_REQUESTS):
+        return jsonify({"success": False, "error": "Request not found"}), 404
+    
+    USER_REQUESTS[req_index]["status"] = "rejected"
+    USER_REQUESTS[req_index]["rejected_at"] = datetime.utcnow().isoformat()
+    USER_REQUESTS[req_index]["rejected_by"] = auth["username"]
+    
+    save_data()
+    
+    return jsonify({"success": True}), 200
 
 # ==================================================
-# 🔑 ACTIVATION ENDPOINTS (Same as before)
+# 🔑 ACTIVATION ENDPOINTS
 # ==================================================
 
 @app.route('/api/activate', methods=['POST'])
@@ -1633,7 +2255,6 @@ def activate():
         
         if lic["start_time"] is None:
             lic["start_time"] = now.isoformat()
-            lic["expires_at"] = (now + timedelta(hours=lic["duration_hours"])).isoformat()
         
         if hwid not in lic["hwids"]:
             lic["hwids"].append(hwid)
@@ -1736,6 +2357,10 @@ def check_pass():
     
     return "", 403
 
+# ==================================================
+# 🚀 ROUTES
+# ==================================================
+
 @app.route('/admin')
 def admin_page():
     return render_template_string(ADMIN_HTML)
@@ -1750,7 +2375,8 @@ def home():
             "verify": "/api/verify-license",
             "validate_user": "/api/validate-user",
             "check_password": "/api/check-password",
-            "admin": "/admin"
+            "admin_panel": "/admin",
+            "user_portal": "/user"
         }
     })
 
