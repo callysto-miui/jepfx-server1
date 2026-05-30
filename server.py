@@ -1,6 +1,4 @@
 from flask import Flask, request, jsonify, render_template_string, Response
-from flask_socketio import SocketIO, emit, join_room, leave_room
-from flask_cors import CORS
 import hashlib
 from datetime import datetime, timedelta
 import uuid
@@ -11,15 +9,11 @@ import time
 import secrets
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = secrets.token_hex(16)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
-CORS(app)
 
 # ==================================================
 # 📂 PERMANENT DATA SAVE
 # ==================================================
 DATA_FILE = "server_data.json"
-CHAT_FILE = "chat_data.json"
 
 # ==================================================
 # 🔐 ADMIN SETTINGS
@@ -58,13 +52,6 @@ USER_REGISTRATIONS = []  # New user registration requests
 VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
 }
-
-# ==================================================
-# 💬 CHAT DATA
-# ==================================================
-CHAT_MESSAGES = {}  # room_id -> list of messages
-CHAT_ROOMS = {}  # room_id -> {participants, created_at, status}
-ONLINE_USERS = {}  # username -> sid
 
 # ==================================================
 # 💰 CREDIT PRICING
@@ -145,35 +132,7 @@ def save_data():
     except Exception as e:
         print(f"❌ SAVE ERROR: {e}")
 
-def load_chat_data():
-    global CHAT_MESSAGES, CHAT_ROOMS
-    if os.path.exists(CHAT_FILE):
-        try:
-            with open(CHAT_FILE, "r") as f:
-                data = json.load(f)
-                CHAT_MESSAGES = data.get("messages", {})
-                CHAT_ROOMS = data.get("rooms", {})
-            print(f"✅ CHAT DATA LOADED: {len(CHAT_MESSAGES)} rooms")
-        except Exception as e:
-            print(f"⚠️ CHAT LOAD ERROR: {e}")
-            CHAT_MESSAGES = {}
-            CHAT_ROOMS = {}
-    else:
-        CHAT_MESSAGES = {}
-        CHAT_ROOMS = {}
-
-def save_chat_data():
-    try:
-        with open(CHAT_FILE, "w") as f:
-            json.dump({
-                "messages": CHAT_MESSAGES,
-                "rooms": CHAT_ROOMS
-            }, f, indent=2, default=str)
-    except Exception as e:
-        print(f"⚠️ CHAT SAVE ERROR: {e}")
-
 load_data()
-load_chat_data()
 
 # ==================================================
 # 📜 LICENSE HISTORY FUNCTION
@@ -323,114 +282,6 @@ def find_license_by_credentials(username, password):
     
     return None, None, None
 
-def get_user_role(username):
-    """Get role of a user for chat"""
-    if username == MASTER_ADMIN["username"]:
-        return "master"
-    if username in ADMINS:
-        return "admin"
-    if username in MODERATORS:
-        return "moderator"
-    for key, activation in CUSTOM_ACTIVATIONS.items():
-        if activation.get("username") == username:
-            return "user"
-    for user, user_data in TRIAL_USERS.items():
-        if user == username:
-            return "user"
-    return None
-
-def get_available_staff():
-    """Get list of staff members (admin + moderators + master)"""
-    staff = []
-    
-    staff.append({
-        "username": MASTER_ADMIN["username"],
-        "role": "master",
-        "online": ONLINE_USERS.get(MASTER_ADMIN["username"]) is not None,
-        "avatar": "👑"
-    })
-    
-    for username, data in ADMINS.items():
-        staff.append({
-            "username": username,
-            "role": "admin",
-            "online": ONLINE_USERS.get(username) is not None,
-            "avatar": "⚙️"
-        })
-    
-    for username, data in MODERATORS.items():
-        staff.append({
-            "username": username,
-            "role": "moderator",
-            "online": ONLINE_USERS.get(username) is not None,
-            "avatar": "🔧"
-        })
-    
-    return staff
-
-def get_chat_room(user1, user2):
-    room_id = f"chat_{min(user1, user2)}_{max(user1, user2)}"
-    if room_id not in CHAT_ROOMS:
-        CHAT_ROOMS[room_id] = {
-            "participants": [user1, user2],
-            "created_at": datetime.utcnow().isoformat()
-        }
-        save_chat_data()
-    return room_id
-
-def save_chat_message(room_id, sender, receiver, message, message_type='text'):
-    if room_id not in CHAT_MESSAGES:
-        CHAT_MESSAGES[room_id] = []
-    
-    msg_data = {
-        "id": uuid.uuid4().hex[:8],
-        "sender": sender,
-        "receiver": receiver,
-        "message": message,
-        "type": message_type,
-        "timestamp": datetime.utcnow().isoformat(),
-        "read": False
-    }
-    
-    CHAT_MESSAGES[room_id].append(msg_data)
-    
-    if len(CHAT_MESSAGES[room_id]) > 1000:
-        CHAT_MESSAGES[room_id] = CHAT_MESSAGES[room_id][-1000:]
-    
-    save_chat_data()
-    return msg_data
-
-def get_user_chats(username):
-    """Get all chat conversations for a user"""
-    conversations = []
-    for room_id, room in CHAT_ROOMS.items():
-        if username in room["participants"]:
-            other = [p for p in room["participants"] if p != username][0]
-            messages = CHAT_MESSAGES.get(room_id, [])
-            unread = sum(1 for m in messages if m["receiver"] == username and not m.get("read", False))
-            last_msg = messages[-1] if messages else None
-            
-            conversations.append({
-                "room_id": room_id,
-                "other_user": other,
-                "other_role": get_user_role(other),
-                "last_message": last_msg["message"][:50] if last_msg else "No messages",
-                "last_time": last_msg["timestamp"] if last_msg else room["created_at"],
-                "unread": unread
-            })
-    
-    conversations.sort(key=lambda x: x["last_time"], reverse=True)
-    return conversations
-
-def get_chat_messages(room_id, username):
-    """Get messages for a room and mark as read"""
-    messages = CHAT_MESSAGES.get(room_id, [])
-    for msg in messages:
-        if msg["receiver"] == username and not msg.get("read", False):
-            msg["read"] = True
-    save_chat_data()
-    return messages
-
 # ==================================================
 # 🔍 MONITORING THREAD
 # ==================================================
@@ -464,451 +315,7 @@ monitor_thread = threading.Thread(target=monitor_expired_licenses, daemon=True)
 monitor_thread.start()
 
 # ==================================================
-# 🔌 SOCKETIO CHAT EVENTS
-# ==================================================
-
-@socketio.on('connect')
-def handle_connect():
-    print(f"🔌 Client connected: {request.sid}")
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    # Remove user from online list
-    username_to_remove = None
-    for user, sid in ONLINE_USERS.items():
-        if sid == request.sid:
-            username_to_remove = user
-            break
-    if username_to_remove:
-        del ONLINE_USERS[username_to_remove]
-        # Broadcast online status
-        emit('online_users', get_available_staff(), broadcast=True)
-        emit('user_offline', {'username': username_to_remove}, broadcast=True)
-        print(f"🔌 User offline: {username_to_remove}")
-
-@socketio.on('register_user')
-def handle_register_user(data):
-    username = data.get('username')
-    password = data.get('password')
-    
-    # Verify credentials
-    license_key, license_type, license_data = find_license_by_credentials(username, password)
-    
-    if license_key:
-        ONLINE_USERS[username] = request.sid
-        user_role = get_user_role(username)
-        emit('registration_success', {
-            'username': username,
-            'role': user_role,
-            'staff_list': get_available_staff(),
-            'conversations': get_user_chats(username)
-        })
-        # Broadcast online status to staff
-        emit('online_users', get_available_staff(), broadcast=True)
-        emit('user_online', {'username': username, 'role': user_role}, broadcast=True)
-        print(f"✅ User registered for chat: {username}")
-    else:
-        emit('registration_error', {'error': 'Invalid credentials'})
-
-@socketio.on('join_chat')
-def handle_join_chat(data):
-    username = data.get('username')
-    other_user = data.get('other_user')
-    
-    if username and other_user:
-        room_id = get_chat_room(username, other_user)
-        join_room(room_id)
-        messages = get_chat_messages(room_id, username)
-        emit('chat_history', {'messages': messages, 'room_id': room_id})
-        print(f"📱 {username} joined chat with {other_user}")
-
-@socketio.on('send_message')
-def handle_send_message(data):
-    sender = data.get('sender')
-    receiver = data.get('receiver')
-    message = data.get('message', '').strip()
-    
-    if not message:
-        return
-    
-    room_id = get_chat_room(sender, receiver)
-    msg_data = save_chat_message(room_id, sender, receiver, message)
-    
-    # Emit to room
-    emit('new_message', msg_data, room=room_id)
-    
-    # Check if receiver is online and send notification
-    receiver_sid = ONLINE_USERS.get(receiver)
-    if receiver_sid:
-        emit('chat_notification', {
-            'from': sender,
-            'message': message[:50],
-            'room_id': room_id
-        }, room=receiver_sid)
-    
-    # Update conversation list for both users
-    for user in [sender, receiver]:
-        user_sid = ONLINE_USERS.get(user)
-        if user_sid:
-            emit('update_conversations', {
-                'conversations': get_user_chats(user)
-            }, room=user_sid)
-
-@socketio.on('typing')
-def handle_typing(data):
-    sender = data.get('sender')
-    receiver = data.get('receiver')
-    is_typing = data.get('is_typing', False)
-    
-    receiver_sid = ONLINE_USERS.get(receiver)
-    if receiver_sid:
-        emit('user_typing', {
-            'from': sender,
-            'is_typing': is_typing
-        }, room=receiver_sid)
-
-@socketio.on('mark_read')
-def handle_mark_read(data):
-    username = data.get('username')
-    other_user = data.get('other_user')
-    
-    if username and other_user:
-        room_id = get_chat_room(username, other_user)
-        messages = CHAT_MESSAGES.get(room_id, [])
-        for msg in messages:
-            if msg["receiver"] == username and not msg.get("read", False):
-                msg["read"] = True
-        save_chat_data()
-        
-        # Update unread count for user
-        user_sid = ONLINE_USERS.get(username)
-        if user_sid:
-            emit('update_conversations', {
-                'conversations': get_user_chats(username)
-            }, room=user_sid)
-
-# ==================================================
-# 🎨 CHAT WIDGET HTML (to be embedded)
-# ==================================================
-CHAT_WIDGET_HTML = """
-<div id="chatWidget" style="position: fixed; bottom: 20px; right: 20px; z-index: 10000; font-family: 'Segoe UI', Arial, sans-serif;">
-    <!-- Chat Button -->
-    <div id="chatButton" onclick="toggleChat()" style="background: linear-gradient(135deg, #7C3AED, #6D28D9); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: transform 0.3s;">
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-        </svg>
-        <span id="chatBadge" style="position: absolute; top: -5px; right: -5px; background: #EF4444; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; font-weight: bold; display: none;">0</span>
-    </div>
-    
-    <!-- Chat Window -->
-    <div id="chatWindow" style="display: none; position: fixed; bottom: 90px; right: 20px; width: 380px; height: 550px; background: #1a1a2e; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); overflow: hidden; flex-direction: column;">
-        <!-- Header -->
-        <div style="background: linear-gradient(135deg, #7C3AED, #6D28D9); padding: 15px; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                <h3 style="color: white; margin: 0;">💬 Live Support</h3>
-                <p style="color: rgba(255,255,255,0.8); margin: 0; font-size: 12px;">Chat with our team</p>
-            </div>
-            <div>
-                <button onclick="minimizeChat()" style="background: none; border: none; color: white; cursor: pointer; margin-right: 10px;">─</button>
-                <button onclick="closeChat()" style="background: none; border: none; color: white; cursor: pointer;">✕</button>
-            </div>
-        </div>
-        
-        <!-- Login Section -->
-        <div id="chatLoginSection" style="padding: 20px;">
-            <p style="color: #aaa; margin-bottom: 15px;">Login with your license credentials to start chatting:</p>
-            <input type="text" id="chatUsername" placeholder="Username" style="width: 100%; padding: 12px; margin: 8px 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(0,0,0,0.3); color: white;">
-            <input type="password" id="chatPassword" placeholder="Password" style="width: 100%; padding: 12px; margin: 8px 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(0,0,0,0.3); color: white;">
-            <button onclick="chatLogin()" style="width: 100%; padding: 12px; background: #7C3AED; border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; margin-top: 10px;">Start Chat</button>
-            <div id="chatLoginError" style="color: #EF4444; font-size: 12px; margin-top: 10px; display: none;"></div>
-        </div>
-        
-        <!-- Chat Interface -->
-        <div id="chatInterface" style="display: none; flex: 1; flex-direction: column; height: 100%;">
-            <!-- Staff List -->
-            <div id="staffListSection" style="padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                <h4 style="color: white; margin: 0 0 10px 0;">👥 Choose who to contact:</h4>
-                <div id="staffList" style="display: flex; gap: 10px; overflow-x: auto;"></div>
-                <div id="currentChatInfo" style="margin-top: 10px; padding: 8px; background: rgba(124,58,237,0.2); border-radius: 8px; display: none;">
-                    <span style="color: #aaa;">Chatting with:</span>
-                    <strong id="chattingWith" style="color: #7C3AED;"></strong>
-                    <span id="typingIndicator" style="color: #aaa; font-size: 11px; margin-left: 10px;"></span>
-                </div>
-            </div>
-            
-            <!-- Messages Area -->
-            <div id="messagesArea" style="flex: 1; overflow-y: auto; padding: 15px; min-height: 250px;">
-                <div style="text-align: center; color: #aaa; padding: 20px;">Select a staff member to start chatting</div>
-            </div>
-            
-            <!-- Message Input -->
-            <div id="messageInputSection" style="padding: 15px; border-top: 1px solid rgba(255,255,255,0.1); display: none;">
-                <div style="display: flex; gap: 10px;">
-                    <input type="text" id="messageInput" placeholder="Type your message..." style="flex: 1; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(0,0,0,0.3); color: white;">
-                    <button onclick="sendMessage()" style="padding: 10px 20px; background: #7C3AED; border: none; border-radius: 8px; color: white; cursor: pointer;">Send</button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-    let socket = null;
-    let currentUser = null;
-    let currentChatWith = null;
-    let currentRoomId = null;
-    let typingTimeout = null;
-    
-    function toggleChat() {
-        const window = document.getElementById('chatWindow');
-        if (window.style.display === 'none' || window.style.display === '') {
-            window.style.display = 'flex';
-            if (socket && currentUser) {
-                loadConversations();
-            }
-        } else {
-            window.style.display = 'none';
-        }
-    }
-    
-    function minimizeChat() {
-        document.getElementById('chatWindow').style.display = 'none';
-    }
-    
-    function closeChat() {
-        document.getElementById('chatWindow').style.display = 'none';
-        if (socket) {
-            socket.disconnect();
-            socket = null;
-        }
-        currentUser = null;
-    }
-    
-    function chatLogin() {
-        const username = document.getElementById('chatUsername').value;
-        const password = document.getElementById('chatPassword').value;
-        
-        if (!username || !password) {
-            showChatError('Please enter username and password');
-            return;
-        }
-        
-        // Connect WebSocket
-        socket = io();
-        
-        socket.on('connect', function() {
-            socket.emit('register_user', {username: username, password: password});
-        });
-        
-        socket.on('registration_success', function(data) {
-            currentUser = data.username;
-            document.getElementById('chatLoginSection').style.display = 'none';
-            document.getElementById('chatInterface').style.display = 'flex';
-            document.getElementById('staffListSection').style.display = 'block';
-            
-            // Display staff list
-            displayStaffList(data.staff_list);
-            
-            // Load conversations
-            if (data.conversations && data.conversations.length > 0) {
-                loadConversations();
-            }
-        });
-        
-        socket.on('registration_error', function(data) {
-            showChatError(data.error);
-        });
-        
-        socket.on('new_message', function(data) {
-            if (currentChatWith === data.sender) {
-                appendMessage(data.sender, data.message, data.timestamp, false);
-                markMessagesAsRead();
-            } else {
-                updateChatBadge();
-                // Show notification
-                if (document.getElementById('chatWindow').style.display !== 'flex') {
-                    document.getElementById('chatButton').style.animation = 'pulse 1s infinite';
-                }
-            }
-            loadConversations();
-        });
-        
-        socket.on('chat_history', function(data) {
-            document.getElementById('messagesArea').innerHTML = '';
-            data.messages.forEach(function(msg) {
-                appendMessage(msg.sender, msg.message, msg.timestamp, msg.sender !== currentUser);
-            });
-            scrollToBottom();
-        });
-        
-        socket.on('update_conversations', function(data) {
-            // Update conversations in background
-        });
-        
-        socket.on('user_typing', function(data) {
-            if (data.from === currentChatWith) {
-                const indicator = document.getElementById('typingIndicator');
-                if (data.is_typing) {
-                    indicator.innerHTML = 'typing...';
-                } else {
-                    indicator.innerHTML = '';
-                }
-            }
-        });
-        
-        socket.on('online_users', function(staffList) {
-            displayStaffList(staffList);
-        });
-        
-        socket.on('user_online', function(data) {
-            if (data.username === currentChatWith) {
-                appendSystemMessage(`${data.username} is now online`);
-            }
-            loadConversations();
-        });
-        
-        socket.on('user_offline', function(data) {
-            if (data.username === currentChatWith) {
-                appendSystemMessage(`${data.username} went offline`);
-            }
-            loadConversations();
-        });
-    }
-    
-    function displayStaffList(staffList) {
-        const container = document.getElementById('staffList');
-        container.innerHTML = '';
-        
-        staffList.forEach(function(staff) {
-            const btn = document.createElement('button');
-            btn.className = 'staff-btn';
-            btn.style.cssText = 'padding: 10px; background: rgba(124,58,237,0.2); border: 1px solid #7C3AED; border-radius: 8px; color: white; cursor: pointer; transition: all 0.3s; min-width: 80px;';
-            btn.innerHTML = `${staff.avatar} ${staff.username}${staff.online ? ' 🟢' : ' ⚫'}`;
-            btn.onclick = function() { startChat(staff.username); };
-            container.appendChild(btn);
-        });
-    }
-    
-    function startChat(otherUser) {
-        currentChatWith = otherUser;
-        document.getElementById('chattingWith').innerHTML = otherUser;
-        document.getElementById('currentChatInfo').style.display = 'block';
-        document.getElementById('messageInputSection').style.display = 'flex';
-        
-        socket.emit('join_chat', {username: currentUser, other_user: otherUser});
-    }
-    
-    function sendMessage() {
-        const input = document.getElementById('messageInput');
-        const message = input.value.trim();
-        
-        if (!message || !currentChatWith) return;
-        
-        socket.emit('send_message', {
-            sender: currentUser,
-            receiver: currentChatWith,
-            message: message
-        });
-        
-        input.value = '';
-        scrollToBottom();
-        
-        // Stop typing indicator
-        if (typingTimeout) clearTimeout(typingTimeout);
-        socket.emit('typing', {sender: currentUser, receiver: currentChatWith, is_typing: false});
-    }
-    
-    function appendMessage(sender, message, timestamp, isOwn) {
-        const area = document.getElementById('messagesArea');
-        const msgDiv = document.createElement('div');
-        msgDiv.style.cssText = `margin-bottom: 12px; display: flex; justify-content: ${isOwn ? 'flex-end' : 'flex-start'};`;
-        
-        const bubble = document.createElement('div');
-        bubble.style.cssText = `max-width: 70%; padding: 10px 15px; border-radius: 15px; background: ${isOwn ? '#7C3AED' : 'rgba(255,255,255,0.1)'}; color: white;`;
-        
-        const nameSpan = document.createElement('div');
-        nameSpan.style.cssText = 'font-size: 10px; opacity: 0.7; margin-bottom: 4px;';
-        nameSpan.innerHTML = isOwn ? 'You' : sender;
-        
-        const msgSpan = document.createElement('div');
-        msgSpan.innerHTML = message;
-        
-        const timeSpan = document.createElement('div');
-        timeSpan.style.cssText = 'font-size: 9px; opacity: 0.5; margin-top: 4px; text-align: right;';
-        timeSpan.innerHTML = new Date(timestamp).toLocaleTimeString();
-        
-        bubble.appendChild(nameSpan);
-        bubble.appendChild(msgSpan);
-        bubble.appendChild(timeSpan);
-        msgDiv.appendChild(bubble);
-        area.appendChild(msgDiv);
-        scrollToBottom();
-    }
-    
-    function appendSystemMessage(message) {
-        const area = document.getElementById('messagesArea');
-        const msgDiv = document.createElement('div');
-        msgDiv.style.cssText = 'text-align: center; margin: 10px;';
-        msgDiv.innerHTML = `<span style="background: rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 10px; font-size: 11px; color: #aaa;">${message}</span>`;
-        area.appendChild(msgDiv);
-        scrollToBottom();
-    }
-    
-    function scrollToBottom() {
-        const area = document.getElementById('messagesArea');
-        area.scrollTop = area.scrollHeight;
-    }
-    
-    function showChatError(msg) {
-        const errorDiv = document.getElementById('chatLoginError');
-        errorDiv.innerHTML = msg;
-        errorDiv.style.display = 'block';
-        setTimeout(function() { errorDiv.style.display = 'none'; }, 3000);
-    }
-    
-    function updateChatBadge() {
-        // This would need an API call to get unread count
-        const badge = document.getElementById('chatBadge');
-        badge.style.display = 'inline-block';
-    }
-    
-    function loadConversations() {
-        // Load existing conversations from server
-        socket.emit('get_conversations', {username: currentUser});
-    }
-    
-    function markMessagesAsRead() {
-        if (currentChatWith) {
-            socket.emit('mark_read', {username: currentUser, other_user: currentChatWith});
-        }
-    }
-    
-    // Typing indicator
-    document.addEventListener('DOMContentLoaded', function() {
-        const input = document.getElementById('messageInput');
-        if (input) {
-            let typingTimer;
-            input.addEventListener('input', function() {
-                if (socket && currentChatWith) {
-                    clearTimeout(typingTimer);
-                    socket.emit('typing', {sender: currentUser, receiver: currentChatWith, is_typing: true});
-                    typingTimer = setTimeout(function() {
-                        socket.emit('typing', {sender: currentUser, receiver: currentChatWith, is_typing: false});
-                    }, 1000);
-                }
-            });
-        }
-    });
-    
-    // CSS animation
-    const style = document.createElement('style');
-    style.innerHTML = `@keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }`;
-    document.head.appendChild(style);
-</script>
-"""
-
-# ==================================================
-# 🎨 USER PORTAL HTML (With Chat)
+# 🎨 USER PORTAL HTML (With Registration)
 # ==================================================
 USER_PORTAL_HTML = """
 <!DOCTYPE html>
@@ -916,7 +323,6 @@ USER_PORTAL_HTML = """
 <head>
     <title>JEPFX License Portal</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
         body { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); min-height: 100vh; padding: 20px; }
@@ -939,7 +345,7 @@ USER_PORTAL_HTML = """
         .contact-buttons { display: flex; gap: 10px; margin-top: 20px; }
         .contact-btn { flex: 1; text-align: center; text-decoration: none; padding: 12px; border-radius: 8px; color: white; font-weight: bold; }
         .telegram-btn { background: #0088cc; }
-        .chat-btn { background: #7C3AED; }
+        .telegram-btn:hover { background: #006699; }
         .request-form { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2); }
         .request-form.show { display: block; }
         .alert-success { background: rgba(16,185,129,0.2); border: 1px solid #10B981; color: #10B981; padding: 12px; border-radius: 8px; margin: 10px 0; }
@@ -950,6 +356,9 @@ USER_PORTAL_HTML = """
         .badge-expired { background: #EF4444; color: white; }
         .badge-warning { background: #F59E0B; color: white; }
         .hidden { display: none; }
+        .loading { text-align: center; padding: 20px; }
+        .spinner { border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid #7C3AED; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .tab-btn { background: rgba(255,255,255,0.1); padding: 10px 20px; border: none; border-radius: 8px; color: white; cursor: pointer; margin: 5px; }
         .tab-btn.active { background: #7C3AED; }
     </style>
@@ -961,11 +370,13 @@ USER_PORTAL_HTML = """
         <p>Register for a license, check status, or request support</p>
     </div>
     
+    <!-- Tabs -->
     <div style="display: flex; gap: 10px; margin-bottom: 20px;">
         <button class="tab-btn active" onclick="showTab('login')">🔐 Login</button>
         <button class="tab-btn" onclick="showTab('register')">📝 Register</button>
     </div>
     
+    <!-- Login Section -->
     <div id="loginSection" class="card">
         <h2>🔐 License Login</h2>
         <p>Already have a license? Login to check status.</p>
@@ -975,6 +386,7 @@ USER_PORTAL_HTML = """
         <div id="loginError" class="alert-error" style="display: none;"></div>
     </div>
     
+    <!-- Register Section -->
     <div id="registerSection" class="card hidden">
         <h2>📝 Register for License</h2>
         <p>Create an account and request a license. Admin will approve and send your credentials.</p>
@@ -987,6 +399,7 @@ USER_PORTAL_HTML = """
         <div id="registerResult" class="alert-info" style="display: none;"></div>
     </div>
     
+    <!-- Status Section (Hidden initially) -->
     <div id="statusSection" class="card hidden">
         <div id="statusContent"></div>
         <div id="requestForm" class="request-form">
@@ -1003,13 +416,9 @@ USER_PORTAL_HTML = """
         </div>
         <div class="contact-buttons">
             <a href="https://t.me/JEPFX_0" target="_blank" class="contact-btn telegram-btn">📱 Contact Admin on Telegram</a>
-            <button class="contact-btn chat-btn" onclick="openChatWidget()">💬 Live Chat Support</button>
         </div>
     </div>
 </div>
-
-<!-- Include Chat Widget -->
-""" + CHAT_WIDGET_HTML + """
 
 <script>
     let currentLicenseKey = null;
@@ -1030,14 +439,6 @@ USER_PORTAL_HTML = """
         }
     }
     
-    function openChatWidget() {
-        if (currentUsername) {
-            document.getElementById('chatUsername').value = currentUsername;
-            document.getElementById('chatPassword').value = document.getElementById('loginPassword').value;
-        }
-        toggleChat();
-    }
-    
     async function registerUser() {
         const username = document.getElementById('regUsername').value;
         const password = document.getElementById('regPassword').value;
@@ -1052,7 +453,7 @@ USER_PORTAL_HTML = """
         
         const btn = event.target;
         btn.disabled = true;
-        btn.innerHTML = 'Submitting...';
+        btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;"></div> Submitting...';
         
         try {
             const res = await fetch('/api/user/register', {
@@ -1099,7 +500,7 @@ USER_PORTAL_HTML = """
         
         const btn = event.target;
         btn.disabled = true;
-        btn.innerHTML = 'Checking...';
+        btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;"></div> Checking...';
         
         try {
             const res = await fetch('/api/user/check-license', {
@@ -1151,7 +552,7 @@ USER_PORTAL_HTML = """
                 ${data.last_used ? `<div class="info-row"><span class="info-label">🕐 Last Used:</span><span class="info-value">${new Date(data.last_used).toLocaleString()}</span></div>` : ''}
             </div>
             ${data.is_expired ? '<div class="alert-error" style="margin:10px 0;">⚠️ Your license has expired. Submit a request for reactivation.</div>' : ''}
-            ${!data.is_expired && data.days_left < 7 ? '<div class="alert-info" style="margin:10px 0;">⚠️ Your license is expiring soon! Submit a request to extend.</div>' : ''}
+            ${!data.is_expired && data.days_left < 7 ? '<div class="alert-warning" style="background:rgba(245,158,11,0.2);border:1px solid #F59E0B;padding:10px;border-radius:8px;margin:10px 0;">⚠️ Your license is expiring soon! Submit a request to extend.</div>' : ''}
         `;
         
         document.getElementById('statusContent').innerHTML = html;
@@ -1203,30 +604,13 @@ USER_PORTAL_HTML = """
         errorDiv.style.display = 'block';
         setTimeout(() => { errorDiv.style.display = 'none'; }, 5000);
     }
-    
-    function toggleChat() {
-        const window = document.getElementById('chatWindow');
-        if (window.style.display === 'none' || window.style.display === '') {
-            window.style.display = 'flex';
-            if (currentUsername) {
-                document.getElementById('chatUsername').value = currentUsername;
-                document.getElementById('chatPassword').value = document.getElementById('loginPassword').value;
-            }
-        } else {
-            window.style.display = 'none';
-        }
-    }
-    
-    function closeChat() {
-        document.getElementById('chatWindow').style.display = 'none';
-    }
 </script>
 </body>
 </html>
 """
 
 # ==================================================
-# 🎨 ADMIN PANEL HTML (With Chat)
+# 🎨 ADMIN PANEL HTML (With Delete Buttons & Registrations)
 # ==================================================
 ADMIN_HTML = """
 <!DOCTYPE html>
@@ -1234,7 +618,6 @@ ADMIN_HTML = """
 <head>
     <title>JEPFX ADMIN PANEL</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
         body { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); min-height: 100vh; padding: 20px; }
@@ -1271,25 +654,6 @@ ADMIN_HTML = """
         .badge-pending { background: #F59E0B; }
         .badge-approved { background: #10B981; }
         .badge-rejected { background: #EF4444; }
-        
-        /* Chat Panel Styles */
-        .chat-panel { position: fixed; bottom: 20px; right: 20px; width: 350px; height: 500px; background: #1a1a2e; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); display: none; flex-direction: column; z-index: 1000; }
-        .chat-panel.open { display: flex; }
-        .chat-header { background: linear-gradient(135deg, #7C3AED, #6D28D9); padding: 15px; border-radius: 15px 15px 0 0; display: flex; justify-content: space-between; align-items: center; }
-        .chat-messages { flex: 1; overflow-y: auto; padding: 15px; }
-        .chat-input-area { padding: 15px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; gap: 10px; }
-        .chat-input { flex: 1; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(0,0,0,0.3); color: white; }
-        .chat-message { margin-bottom: 12px; display: flex; justify-content: flex-start; }
-        .chat-message.own { justify-content: flex-end; }
-        .chat-bubble { max-width: 70%; padding: 10px 15px; border-radius: 15px; background: rgba(255,255,255,0.1); color: white; }
-        .chat-bubble.own { background: #7C3AED; }
-        .chat-user-list { max-height: 200px; overflow-y: auto; border-bottom: 1px solid rgba(255,255,255,0.1); padding: 10px; }
-        .chat-user { padding: 8px; margin: 4px 0; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; }
-        .chat-user:hover { background: rgba(124,58,237,0.3); }
-        .chat-user.online { border-left: 3px solid #10B981; }
-        .chat-user.offline { opacity: 0.6; }
-        .chat-badge { position: absolute; top: -5px; right: -5px; background: #EF4444; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; }
-        .typing-indicator { font-size: 11px; color: #aaa; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -1315,7 +679,6 @@ ADMIN_HTML = """
             <div class="stat-card" id="statPermanentCard" style="display: none;"><div class="stat-number" id="statPermanent">0</div><div>My Permanent</div></div>
             <div class="stat-card"><div class="stat-number" id="statRegistrations">0</div><div>Registrations</div></div>
             <div class="stat-card"><div class="stat-number" id="statRequests">0</div><div>Requests</div></div>
-            <div class="stat-card" onclick="openChatPanel()"><div class="stat-number" id="chatUnread">0</div><div>Chat Messages</div></div>
         </div>
         
         <div class="tabs" id="tabsContainer">
@@ -1329,7 +692,6 @@ ADMIN_HTML = """
             <button class="tab" id="adminTab" style="display: none;" onclick="switchTab('admins')">👨‍💼 MANAGE</button>
             <button class="tab" onclick="switchTab('changePassword')">🔐 PASSWORD</button>
             <button class="tab" onclick="switchTab('monitor')">📈 MONITOR</button>
-            <button class="tab" onclick="openChatPanel()">💬 CHAT</button>
         </div>
         
         <!-- Generate Trial -->
@@ -1393,6 +755,7 @@ ADMIN_HTML = """
         <!-- Registrations Tab -->
         <div id="registrations" class="content">
             <h2>📝 User Registration Requests</h2>
+            <p>Users register here. Approve to create a license for them.</p>
             <button onclick="loadRegistrations()">REFRESH</button>
             <div id="registrationsList"></div>
         </div>
@@ -1469,28 +832,6 @@ ADMIN_HTML = """
     </div>
 </div>
 
-<!-- Chat Panel -->
-<div id="chatPanel" class="chat-panel">
-    <div class="chat-header">
-        <span>💬 Live Support Chat</span>
-        <div>
-            <button onclick="minimizeChatPanel()" style="background: none; border: none; color: white; cursor: pointer; margin-right: 10px;">─</button>
-            <button onclick="closeChatPanel()" style="background: none; border: none; color: white; cursor: pointer;">✕</button>
-        </div>
-    </div>
-    <div id="chatUserList" class="chat-user-list">
-        <div style="text-align: center; padding: 20px;">Loading users...</div>
-    </div>
-    <div id="chatMessagesArea" class="chat-messages" style="display: none;">
-        <div id="chatMessages"></div>
-        <div id="typingIndicator" class="typing-indicator"></div>
-    </div>
-    <div id="chatInputArea" class="chat-input-area" style="display: none;">
-        <input type="text" id="chatInput" class="chat-input" placeholder="Type a message...">
-        <button onclick="sendChatMessage()">Send</button>
-    </div>
-</div>
-
 <div id="credsModal" class="modal">
     <div class="modal-content">
         <span class="close" onclick="closeModal()">&times;</span>
@@ -1502,17 +843,11 @@ ADMIN_HTML = """
 
 <script>
     const API_URL = window.location.origin;
-    let currentUser = null, currentRole = null, currentPassword = null;
-    let chatSocket = null;
-    let currentChatUser = null;
-    let chatUnreadCount = 0;
+    let currentUser = null, currentRole = null;
     
-    // ========== ADMIN FUNCTIONS ==========
     async function login() {
         const username = document.getElementById('loginUsername').value;
         const password = document.getElementById('loginPassword').value;
-        currentPassword = password;
-        
         const res = await fetch(API_URL + '/api/admin/login', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({username: username, password: password})
@@ -1546,232 +881,10 @@ ADMIN_HTML = """
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainPanel').style.display = 'block';
             loadStats(); loadMyLicenses(); loadHistory(); loadRegistrations(); loadUserRequests();
-            
-            // Initialize chat
-            initChatSocket();
         } else {
             document.getElementById('loginError').style.display = 'block';
         }
     }
-    
-    function initChatSocket() {
-        chatSocket = io();
-        
-        chatSocket.on('connect', function() {
-            chatSocket.emit('register_user', {username: currentUser, password: currentPassword});
-        });
-        
-        chatSocket.on('registration_success', function(data) {
-            loadChatUserList(data.staff_list);
-        });
-        
-        chatSocket.on('new_message', function(data) {
-            if (currentChatUser === data.sender) {
-                appendChatMessage(data.sender, data.message, false);
-                markChatMessagesRead();
-            } else {
-                chatUnreadCount++;
-                updateChatBadge();
-            }
-            loadChatUserList(null);
-        });
-        
-        chatSocket.on('chat_history', function(data) {
-            document.getElementById('chatMessages').innerHTML = '';
-            data.messages.forEach(function(msg) {
-                appendChatMessage(msg.sender, msg.message, msg.sender !== currentUser);
-            });
-            scrollChatToBottom();
-        });
-        
-        chatSocket.on('update_conversations', function(data) {
-            // Update UI
-        });
-        
-        chatSocket.on('user_typing', function(data) {
-            if (data.from === currentChatUser) {
-                const indicator = document.getElementById('typingIndicator');
-                if (data.is_typing) {
-                    indicator.innerHTML = data.from + ' is typing...';
-                } else {
-                    indicator.innerHTML = '';
-                }
-            }
-        });
-        
-        chatSocket.on('online_users', function(staffList) {
-            loadChatUserList(staffList);
-        });
-        
-        chatSocket.on('user_online', function(data) {
-            loadChatUserList(null);
-            if (currentChatUser === data.username) {
-                appendSystemMessage(data.username + ' is now online');
-            }
-        });
-        
-        chatSocket.on('user_offline', function(data) {
-            loadChatUserList(null);
-            if (currentChatUser === data.username) {
-                appendSystemMessage(data.username + ' went offline');
-            }
-        });
-    }
-    
-    function loadChatUserList(staffList) {
-        if (!staffList) {
-            chatSocket.emit('get_staff', {username: currentUser});
-            return;
-        }
-        
-        const container = document.getElementById('chatUserList');
-        container.innerHTML = '<div style="padding: 10px; color: #aaa;">Staff Members:</div>';
-        
-        staffList.forEach(function(staff) {
-            if (staff.username !== currentUser) {
-                const userDiv = document.createElement('div');
-                userDiv.className = 'chat-user ' + (staff.online ? 'online' : 'offline');
-                userDiv.innerHTML = `
-                    <span>${staff.avatar}</span>
-                    <span style="flex:1">${staff.username}</span>
-                    <span style="font-size:10px;">${staff.role}</span>
-                    <span style="font-size:10px;">${staff.online ? '🟢' : '⚫'}</span>
-                `;
-                userDiv.onclick = function() { startChatWith(staff.username); };
-                container.appendChild(userDiv);
-            }
-        });
-    }
-    
-    function startChatWith(username) {
-        currentChatUser = username;
-        document.getElementById('chatUserList').style.display = 'none';
-        document.getElementById('chatMessagesArea').style.display = 'flex';
-        document.getElementById('chatInputArea').style.display = 'flex';
-        document.getElementById('chatMessagesArea').style.flexDirection = 'column';
-        
-        chatSocket.emit('join_chat', {username: currentUser, other_user: username});
-        
-        // Mark messages as read
-        setTimeout(markChatMessagesRead, 500);
-    }
-    
-    function sendChatMessage() {
-        const input = document.getElementById('chatInput');
-        const message = input.value.trim();
-        
-        if (!message || !currentChatUser) return;
-        
-        chatSocket.emit('send_message', {
-            sender: currentUser,
-            receiver: currentChatUser,
-            message: message
-        });
-        
-        appendChatMessage(currentUser, message, true);
-        input.value = '';
-        scrollChatToBottom();
-        
-        // Stop typing indicator
-        if (typingTimeout) clearTimeout(typingTimeout);
-        chatSocket.emit('typing', {sender: currentUser, receiver: currentChatUser, is_typing: false});
-    }
-    
-    function appendChatMessage(sender, message, isOwn) {
-        const container = document.getElementById('chatMessages');
-        const msgDiv = document.createElement('div');
-        msgDiv.className = 'chat-message ' + (isOwn ? 'own' : '');
-        
-        const bubble = document.createElement('div');
-        bubble.className = 'chat-bubble ' + (isOwn ? 'own' : '');
-        
-        if (!isOwn) {
-            const nameSpan = document.createElement('div');
-            nameSpan.style.cssText = 'font-size: 10px; opacity: 0.7; margin-bottom: 4px;';
-            nameSpan.innerHTML = sender;
-            bubble.appendChild(nameSpan);
-        }
-        
-        const msgSpan = document.createElement('div');
-        msgSpan.innerHTML = message;
-        bubble.appendChild(msgSpan);
-        
-        const timeSpan = document.createElement('div');
-        timeSpan.style.cssText = 'font-size: 9px; opacity: 0.5; margin-top: 4px; text-align: right;';
-        timeSpan.innerHTML = new Date().toLocaleTimeString();
-        bubble.appendChild(timeSpan);
-        
-        msgDiv.appendChild(bubble);
-        container.appendChild(msgDiv);
-        scrollChatToBottom();
-    }
-    
-    function appendSystemMessage(message) {
-        const container = document.getElementById('chatMessages');
-        const msgDiv = document.createElement('div');
-        msgDiv.style.cssText = 'text-align: center; margin: 10px;';
-        msgDiv.innerHTML = `<span style="background: rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 10px; font-size: 11px; color: #aaa;">${message}</span>`;
-        container.appendChild(msgDiv);
-        scrollChatToBottom();
-    }
-    
-    function markChatMessagesRead() {
-        if (currentChatUser) {
-            chatSocket.emit('mark_read', {username: currentUser, other_user: currentChatUser});
-            chatUnreadCount = 0;
-            updateChatBadge();
-        }
-    }
-    
-    function updateChatBadge() {
-        const badge = document.getElementById('chatUnread');
-        if (badge) {
-            badge.textContent = chatUnreadCount;
-        }
-    }
-    
-    function scrollChatToBottom() {
-        const area = document.getElementById('chatMessages');
-        area.scrollTop = area.scrollHeight;
-    }
-    
-    function openChatPanel() {
-        const panel = document.getElementById('chatPanel');
-        panel.classList.add('open');
-        if (chatSocket && currentUser) {
-            loadChatUserList(null);
-        }
-    }
-    
-    function minimizeChatPanel() {
-        const panel = document.getElementById('chatPanel');
-        panel.classList.remove('open');
-    }
-    
-    function closeChatPanel() {
-        const panel = document.getElementById('chatPanel');
-        panel.classList.remove('open');
-        document.getElementById('chatUserList').style.display = 'block';
-        document.getElementById('chatMessagesArea').style.display = 'none';
-        document.getElementById('chatInputArea').style.display = 'none';
-        currentChatUser = null;
-    }
-    
-    let typingTimeout = null;
-    document.addEventListener('DOMContentLoaded', function() {
-        const input = document.getElementById('chatInput');
-        if (input) {
-            input.addEventListener('input', function() {
-                if (chatSocket && currentChatUser) {
-                    clearTimeout(typingTimeout);
-                    chatSocket.emit('typing', {sender: currentUser, receiver: currentChatUser, is_typing: true});
-                    typingTimeout = setTimeout(function() {
-                        chatSocket.emit('typing', {sender: currentUser, receiver: currentChatUser, is_typing: false});
-                    }, 1000);
-                }
-            });
-        }
-    });
     
     function switchTab(tabId) {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -1798,7 +911,7 @@ ADMIN_HTML = """
     async function loadStats() {
         const res = await fetch(API_URL + '/api/admin/get-stats', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
         if(data.success) {
@@ -1838,7 +951,7 @@ ADMIN_HTML = """
         const duration = document.getElementById('trialDuration').value;
         const res = await fetch(API_URL + '/api/admin/generate-trial', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, duration_hours: parseInt(duration)})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, duration_hours: parseInt(duration)})
         });
         const data = await res.json();
         const resultDiv = document.getElementById('trialResult');
@@ -1860,7 +973,7 @@ ADMIN_HTML = """
         if(!username || !password || !license) { alert('Fill all fields!'); return; }
         const res = await fetch(API_URL + '/api/admin/create-custom-activation', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, username, password, license_key: license, duration_type: durationType, duration_value: durationValue})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, username, password, license_key: license, duration_type: durationType, duration_value: durationValue})
         });
         const data = await res.json();
         const resultDiv = document.getElementById('customResult');
@@ -1884,7 +997,7 @@ ADMIN_HTML = """
         if(!license) { alert('License key required!'); return; }
         const res = await fetch(API_URL + '/api/admin/create-permanent-license', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, license_key: license, username, password})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, license_key: license, username, password})
         });
         const data = await res.json();
         const resultDiv = document.getElementById('permResult');
@@ -1908,10 +1021,10 @@ ADMIN_HTML = """
     async function loadMyTrials() {
         const res = await fetch(API_URL + '/api/admin/get-my-trials', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>License</th><th>Duration</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
+        let html = '<tr><table><th>License</th><th>Duration</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.trials.forEach(t => {
             html += `<tr>
                 <td>${t.license_key} <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${t.license_key}')">Copy</button></td>
@@ -1930,10 +1043,10 @@ ADMIN_HTML = """
     async function loadMyCustom() {
         const res = await fetch(API_URL + '/api/admin/get-my-custom', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>License</th><th>Username</th><th>Password</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
+        let html = '能懈<table><tr><th>License</th><th>Username</th><th>Password</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.activations.forEach(a => {
             html += `<tr>
                 <td>${a.license_key} <button class="copy-btn" onclick="copyToClipboard('${a.license_key}')">Copy</button></td>
@@ -1953,10 +1066,10 @@ ADMIN_HTML = """
     async function loadMyPermanent() {
         const res = await fetch(API_URL + '/api/admin/get-my-permanent', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>License</th><th>Username</th><th>HWIDs</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
+        let html = '能懈<table><tr><th>License</th><th>Username</th><th>HWIDs</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.licenses.forEach(l => {
             html += `<tr>
                 <td>${l.license_key} <button class="copy-btn" onclick="copyToClipboard('${l.license_key}')">Copy</button></td>
@@ -1974,10 +1087,10 @@ ADMIN_HTML = """
     async function loadRegistrations() {
         const res = await fetch(API_URL + '/api/admin/get-registrations', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>Date</th><th>Username</th><th>Telegram</th><th>Facebook</th><th>Reason</th><th>Status</th><th>Action</th></tr>';
+        let html = '能懈<table><tr><th>Date</th><th>Username</th><th>Telegram</th><th>Facebook</th><th>Reason</th><th>Status</th><th>Action</th></tr>';
         data.registrations.forEach((reg, idx) => {
             html += `<tr>
                 <td>${new Date(reg.created_at).toLocaleString()}</td>
@@ -1988,7 +1101,7 @@ ADMIN_HTML = """
                 <td><span class="badge badge-${reg.status}">${reg.status}</span></td>
                 <td>
                     ${reg.status === 'pending' ? `
-                        <button class="btn-success" onclick="approveRegistration(${idx}, '${reg.username}', '${reg.telegram}')">Approve</button>
+                        <button class="btn-success" onclick="approveRegistration(${idx}, '${reg.username}', '${reg.telegram}')">Approve & Create License</button>
                         <button class="btn-danger" onclick="rejectRegistration(${idx})">Reject</button>
                     ` : '-'}
                 </td>
@@ -1999,45 +1112,69 @@ ADMIN_HTML = """
     }
     
     async function approveRegistration(idx, username, telegram) {
-        if(!confirm(`Approve registration for ${username}?`)) return;
+        if(!confirm(`Approve registration for ${username}? You will need to create a license for them.`)) return;
+        
         const licenseType = prompt('Select license type:\n1 - Trial\n2 - Custom\n3 - Permanent', '1');
         if(!licenseType) return;
         
         if(licenseType === '1') {
             const duration = prompt('Duration in hours (e.g., 24, 168, 720):', '168');
             if(!duration) return;
+            
             const res = await fetch(API_URL + '/api/admin/approve-registration-trial', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, registration_index: idx, duration_hours: parseInt(duration)})
+                body: JSON.stringify({
+                    admin_username: currentUser,
+                    admin_password: document.getElementById('loginPassword').value,
+                    registration_index: idx,
+                    duration_hours: parseInt(duration)
+                })
             });
             const data = await res.json();
             if(data.success) {
                 alert(`License created!\n\nLicense Key: ${data.license_key}\nUsername: ${data.username}\nPassword: ${data.password}\n\nContact user on Telegram: ${telegram}`);
                 loadRegistrations(); loadStats();
-            } else { alert('Error: ' + data.error); }
+            } else {
+                alert('Error: ' + data.error);
+            }
         } else if(licenseType === '2') {
             const durationType = prompt('Duration type (hours/days/weeks/months/years/unlimited):', 'days');
             const durationValue = prompt('Duration value:', '7');
             if(!durationType || !durationValue) return;
+            
             const res = await fetch(API_URL + '/api/admin/approve-registration-custom', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, registration_index: idx, duration_type: durationType, duration_value: parseFloat(durationValue)})
+                body: JSON.stringify({
+                    admin_username: currentUser,
+                    admin_password: document.getElementById('loginPassword').value,
+                    registration_index: idx,
+                    duration_type: durationType,
+                    duration_value: parseFloat(durationValue)
+                })
             });
             const data = await res.json();
             if(data.success) {
                 alert(`License created!\n\nLicense Key: ${data.license_key}\nUsername: ${data.username}\nPassword: ${data.password}\n\nContact user on Telegram: ${telegram}`);
                 loadRegistrations(); loadStats();
-            } else { alert('Error: ' + data.error); }
+            } else {
+                alert('Error: ' + data.error);
+            }
         } else if(licenseType === '3') {
             const res = await fetch(API_URL + '/api/admin/approve-registration-permanent', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, registration_index: idx})
+                body: JSON.stringify({
+                    admin_username: currentUser,
+                    admin_password: document.getElementById('loginPassword').value,
+                    registration_index: idx
+                })
             });
             const data = await res.json();
             if(data.success) {
                 alert(`Permanent License created!\n\nLicense Key: ${data.license_key}\nUsername: ${data.username}\nPassword: ${data.password}\n\nContact user on Telegram: ${telegram}`);
                 loadRegistrations(); loadStats();
-            } else { alert('Error: ' + data.error); }
+            } else {
+                alert('Error: ' + data.error);
+            }
         }
     }
     
@@ -2045,7 +1182,7 @@ ADMIN_HTML = """
         if(!confirm('Reject this registration?')) return;
         const res = await fetch(API_URL + '/api/admin/reject-registration', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, registration_index: idx})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, registration_index: idx})
         });
         const data = await res.json();
         if(data.success) { alert('Registration rejected!'); loadRegistrations(); loadStats(); }
@@ -2055,10 +1192,10 @@ ADMIN_HTML = """
     async function loadUserRequests() {
         const res = await fetch(API_URL + '/api/admin/get-requests', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>Date</th><th>License</th><th>User</th><th>Type</th><th>Message</th><th>Status</th><th>Action</th></tr>';
+        let html = '能懈<table><tr><th>Date</th><th>License</th><th>User</th><th>Type</th><th>Message</th><th>Status</th><th>Action</th></tr>';
         data.requests.forEach((req, idx) => {
             html += `<tr>
                 <td>${new Date(req.created_at).toLocaleString()}</td>
@@ -2079,7 +1216,7 @@ ADMIN_HTML = """
         if(!confirm(`Approve request for ${licenseKey}?`)) return;
         const res = await fetch(API_URL + '/api/admin/approve-request', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, request_index: reqIdx, license_key: licenseKey, request_type: reqType, days_to_add: days})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, request_index: reqIdx, license_key: licenseKey, request_type: reqType, days_to_add: days})
         });
         const data = await res.json();
         if(data.success) { alert('Approved!'); loadUserRequests(); loadStats(); }
@@ -2090,7 +1227,7 @@ ADMIN_HTML = """
         if(!confirm('Reject this request?')) return;
         const res = await fetch(API_URL + '/api/admin/reject-request', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, request_index: reqIdx})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, request_index: reqIdx})
         });
         const data = await res.json();
         if(data.success) { alert('Rejected!'); loadUserRequests(); }
@@ -2100,10 +1237,10 @@ ADMIN_HTML = """
     async function loadHistory() {
         const res = await fetch(API_URL + '/api/admin/get-history', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>Created</th><th>License</th><th>Username</th><th>Password</th><th>Type</th><th>Owner</th><th>Expires</th><th>Action</th></tr>';
+        let html = '能懈<table><tr><th>Created</th><th>License</th><th>Username</th><th>Password</th><th>Type</th><th>Owner</th><th>Expires</th><th>Action</th></tr>';
         data.history.forEach(h => {
             html += `<tr>
                 <td>${new Date(h.created_at).toLocaleString()}</td>
@@ -2127,23 +1264,23 @@ ADMIN_HTML = """
     }
     
     async function exportHistory() {
-        window.open(API_URL + '/api/admin/export-history?admin_username=' + currentUser + '&admin_password=' + currentPassword);
+        window.open(API_URL + '/api/admin/export-history?admin_username=' + currentUser + '&admin_password=' + document.getElementById('loginPassword').value);
     }
     
     async function loadAdmins() {
         const res = await fetch(API_URL + '/api/admin/get-admins', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let adminsHtml = '<tr><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
+        let adminsHtml = '能懈<table><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
         data.admins.forEach(a => { adminsHtml += `<tr><td>${a.username}</td><td>${a.credits}</td><td>${a.created_at || '-'}</td><td><button class="btn-danger" onclick="deleteAdmin('${a.username}')">Delete</button></td></tr>`; });
         adminsHtml += '</table>';
         document.getElementById('adminsList').innerHTML = adminsHtml;
         
         let modsHtml = '<table><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
         data.moderators.forEach(m => { modsHtml += `<tr><td>${m.username}</td><td>${m.credits}</td><td>${m.created_at || '-'}</td><td><button class="btn-danger" onclick="deleteModerator('${m.username}')">Delete</button></td></tr>`; });
-        modsHtml += '<table>';
+        modsHtml += '</table>';
         document.getElementById('moderatorsList').innerHTML = modsHtml;
     }
     
@@ -2154,7 +1291,7 @@ ADMIN_HTML = """
         const credits = parseFloat(document.getElementById('newAdminCredits').value);
         const res = await fetch(API_URL + '/api/admin/add-admin', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, new_username: username, new_password: password, role: role, credits: credits})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, new_username: username, new_password: password, role: role, credits: credits})
         });
         const data = await res.json();
         if(data.success) { alert('User added!'); loadAdmins(); }
@@ -2166,7 +1303,7 @@ ADMIN_HTML = """
         const newRole = document.getElementById('newRoleSelect').value;
         const res = await fetch(API_URL + '/api/admin/change-role', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, target_username: username, new_role: newRole})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, target_username: username, new_role: newRole})
         });
         const data = await res.json();
         if(data.success) { alert(`Role changed to ${newRole}!`); loadAdmins(); }
@@ -2178,7 +1315,7 @@ ADMIN_HTML = """
         const newPass = document.getElementById('newPasswordForTarget').value;
         const res = await fetch(API_URL + '/api/admin/change-other-password', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, target_username: targetUser, new_password: newPass})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, target_username: targetUser, new_password: newPass})
         });
         const data = await res.json();
         if(data.success) { alert('Password changed!'); }
@@ -2190,7 +1327,7 @@ ADMIN_HTML = """
         const amount = parseFloat(document.getElementById('creditAmount').value);
         const res = await fetch(API_URL + '/api/admin/manage-credits', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword, target_username: username, amount: amount})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, target_username: username, amount: amount})
         });
         const data = await res.json();
         if(data.success) { alert(`New balance: ${data.new_balance}`); loadAdmins(); if(username === currentUser) loadStats(); }
@@ -2216,17 +1353,17 @@ ADMIN_HTML = """
     async function loadMonitor() {
         const res = await fetch(API_URL + '/api/admin/get-monitor-data', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: currentPassword})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
         document.getElementById('monitorData').innerHTML = `📊 STATUS<br><br>🔹 Trials: ${data.my_trials}<br>🔹 Custom: ${data.my_custom}<br>🔹 Permanent: ${data.my_permanent}<br>🔹 Registrations: ${data.registrations}<br>🔹 Requests: ${data.pending_requests}<br>🔹 History: ${data.history_count}<br>🔹 Active Users: ${data.active_users}<br><br>⏰ ${data.server_time}`;
     }
     
-    async function deleteTrial(key) { if(confirm('Delete this trial?')) { await fetch(API_URL + '/api/admin/delete-trial', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:currentPassword,license_key:key})}); loadMyTrials(); loadStats(); } }
-    async function deleteCustomActivation(key) { if(confirm('Delete this activation?')) { await fetch(API_URL + '/api/admin/delete-custom-activation', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:currentPassword,license_key:key})}); loadMyCustom(); loadStats(); } }
-    async function deletePermanentLicense(key) { if(confirm('Delete this license?')) { await fetch(API_URL + '/api/admin/delete-permanent-license', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:currentPassword,license_key:key})}); loadMyPermanent(); loadStats(); } }
-    async function deleteAdmin(username) { if(confirm(`Delete ${username}?`)) { await fetch(API_URL + '/api/admin/delete-admin', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:currentPassword,target_username:username,role:'admin'})}); loadAdmins(); } }
-    async function deleteModerator(username) { if(confirm(`Delete ${username}?`)) { await fetch(API_URL + '/api/admin/delete-admin', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:currentPassword,target_username:username,role:'moderator'})}); loadAdmins(); } }
+    async function deleteTrial(key) { if(confirm('Delete this trial?')) { await fetch(API_URL + '/api/admin/delete-trial', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyTrials(); loadStats(); } }
+    async function deleteCustomActivation(key) { if(confirm('Delete this activation?')) { await fetch(API_URL + '/api/admin/delete-custom-activation', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyCustom(); loadStats(); } }
+    async function deletePermanentLicense(key) { if(confirm('Delete this license?')) { await fetch(API_URL + '/api/admin/delete-permanent-license', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyPermanent(); loadStats(); } }
+    async function deleteAdmin(username) { if(confirm(`Delete ${username}?`)) { await fetch(API_URL + '/api/admin/delete-admin', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,target_username:username,role:'admin'})}); loadAdmins(); } }
+    async function deleteModerator(username) { if(confirm(`Delete ${username}?`)) { await fetch(API_URL + '/api/admin/delete-admin', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,target_username:username,role:'moderator'})}); loadAdmins(); } }
     
     function closeModal() { document.getElementById('credsModal').style.display = 'none'; }
     setInterval(() => { if(document.getElementById('mainPanel').style.display === 'block') loadStats(); }, 30000);
@@ -2236,12 +1373,8 @@ ADMIN_HTML = """
 """
 
 # ==================================================
-# 🔐 API ENDPOINTS (Keep all your existing endpoints)
+# 🔐 API ENDPOINTS
 # ==================================================
-
-# [PASTE ALL YOUR EXISTING API ENDPOINTS HERE]
-# The endpoints from your original server.py go here...
-# (I'll include them in the final output)
 
 @app.route('/api/admin/login', methods=['POST'])
 def admin_login():
@@ -2870,6 +2003,7 @@ def admin_approve_registration_trial():
     
     reg = USER_REGISTRATIONS[reg_index]
     
+    # Create trial license
     lic = f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
     user = reg["username"]
     pwd = reg["password"]
@@ -2931,6 +2065,7 @@ def admin_approve_registration_custom():
         expires_at = now + timedelta(days=duration_value * 30)
     elif duration_type == "years":
         expires_at = now + timedelta(days=duration_value * 365)
+    # unlimited = None
     
     license_key = f"JEPFX-CUSTOM-{uuid.uuid4().hex[:8].upper()}"
     
@@ -3140,6 +2275,7 @@ def user_register():
     if not username or not password or not telegram:
         return jsonify({"success": False, "error": "Username, password, and Telegram contact are required"}), 400
     
+    # Check if username already exists
     if username in VALID_USERS or username in TRIAL_USERS or username in [r.get("username") for r in USER_REGISTRATIONS if r.get("status") == "pending"]:
         return jsonify({"success": False, "error": "Username already taken or pending approval"}), 400
     
@@ -3280,6 +2416,21 @@ def activate():
         log_usage(key, "activation", {"hwid": hwid})
         return jsonify({"status": "activated"}), 200
     
+    if key in LICENSES:
+        lic = LICENSES[key]
+        if lic["type"] == "unlimited":
+            if hwid not in lic["hwid"]:
+                lic["hwid"].append(hwid)
+            return jsonify({"status": "activated"}), 200
+        if lic["type"] == "single":
+            if lic["hwid"] == "":
+                lic["hwid"] = hwid
+                return jsonify({"status": "activated"}), 200
+            elif lic["hwid"] == hwid:
+                return jsonify({"status": "activated"}), 200
+            else:
+                return jsonify({"status": "blocked", "msg": "Used on another PC"}), 403
+    
     return jsonify({"status": "invalid"}), 403
 
 @app.route('/api/verify-license', methods=['POST'])
@@ -3315,6 +2466,14 @@ def verify():
                     return jsonify({"expired": True}), 403
             if hwid in lic.get("hwids", []):
                 log_usage(key, "verification", {"hwid": hwid})
+                return jsonify({"ok": True}), 200
+            return jsonify({"invalid": True}), 403
+    
+    for key, lic in LICENSES.items():
+        if hashlib.sha256(key.encode()).hexdigest() == key_hash:
+            if lic["type"] == "unlimited" and hwid in lic["hwid"]:
+                return jsonify({"ok": True}), 200
+            if lic["type"] == "single" and lic["hwid"] == hwid:
                 return jsonify({"ok": True}), 200
             return jsonify({"invalid": True}), 403
     
@@ -3363,7 +2522,7 @@ def admin_page():
 def home():
     return jsonify({
         "status": "online",
-        "message": "JEPFX License Server Running with Live Chat",
+        "message": "JEPFX License Server Running",
         "endpoints": {
             "activate": "/api/activate",
             "verify": "/api/verify-license",
@@ -3375,4 +2534,4 @@ def home():
     })
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=10000, debug=False)
+    app.run(host="0.0.0.0", port=10000)
