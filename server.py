@@ -30,56 +30,40 @@ ADMINS = {}  # Will be loaded from JSON
 MODERATORS = {}  # Will be loaded from JSON
 
 # ==================================================
-# 📝 LICENSES & USERS
+# 📝 LICENSES & USERS (Now with owner tracking)
 # ==================================================
 PERMANENT_LICENSES = {}
-CUSTOM_ACTIVATIONS = {}  # Now supports multiple HWIDs
+CUSTOM_ACTIVATIONS = {}
+TRIAL_LICENSES = {}
+TRIAL_USERS = {}
+USAGE_LOGS = {}
 
-LICENSES = {
-    "JEPFX_0": {"type": "unlimited", "hwid": [], "expires_at": None},
-    "RHYZ_0": {"type": "unlimited", "hwid": [], "expires_at": None},
-}
+# Each license now has an "owner" field to track who created it
+# Example: TRIAL_LICENSES[key] = {"owner": "admin_username", ...}
 
 VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
 }
 
-TRIAL_LICENSES = {}
-TRIAL_USERS = {}
-USAGE_LOGS = {}
-
 # ==================================================
-# 💰 CREDIT PRICING SYSTEM (Lowered to max 50)
+# 💰 CREDIT PRICING SYSTEM
 # ==================================================
 CREDIT_PRICING = {
-    "trial": 0.5,  # 0.5 credit per trial (50 cents equivalent)
-    "custom_hour": 0.1,  # 0.1 credit per hour (10 cents)
-    "custom_day": 1,  # 1 credit per day
-    "custom_week": 5,  # 5 credits per week
-    "custom_month": 10,  # 10 credits per month
-    "custom_year": 30,  # 30 credits per year
-    "custom_unlimited": 50,  # 50 credits for unlimited (MAX)
-    "permanent": 50  # 50 credits for permanent license (MAX)
-}
-
-# Duration options with pricing
-DURATION_OPTIONS = {
-    "3_hours": {"hours": 3, "price": 0.3, "label": "3 Hours"},
-    "6_hours": {"hours": 6, "price": 0.6, "label": "6 Hours"},
-    "12_hours": {"hours": 12, "price": 1.2, "label": "12 Hours"},
-    "1_day": {"hours": 24, "price": 1, "label": "1 Day"},
-    "3_days": {"hours": 72, "price": 3, "label": "3 Days"},
-    "7_days": {"hours": 168, "price": 5, "label": "1 Week"},
-    "30_days": {"hours": 720, "price": 10, "label": "1 Month"},
-    "90_days": {"hours": 2160, "price": 20, "label": "3 Months"},
-    "365_days": {"hours": 8760, "price": 30, "label": "1 Year"}
+    "trial_hour": 0.1,  # 0.1 credit per hour
+    "custom_hour": 0.1,
+    "custom_day": 1,
+    "custom_week": 5,
+    "custom_month": 10,
+    "custom_year": 30,
+    "custom_unlimited": 50,
+    "permanent": 50
 }
 
 # ==================================================
 # 💾 SAVE / LOAD DATA
 # ==================================================
 def load_data():
-    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS
+    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS, VALID_USERS
     
     if os.path.exists(DATA_FILE):
         try:
@@ -92,6 +76,7 @@ def load_data():
                 USAGE_LOGS = data.get("usage_logs", {})
                 ADMINS = data.get("admins", {})
                 MODERATORS = data.get("moderators", {})
+                VALID_USERS.update(data.get("valid_users", {}))
             print("✅ DATA LOADED SUCCESSFULLY")
         except Exception as e:
             print(f"⚠️ LOAD ERROR: {e}")
@@ -118,7 +103,8 @@ def save_data():
         "custom_activations": CUSTOM_ACTIVATIONS,
         "usage_logs": USAGE_LOGS,
         "admins": ADMINS,
-        "moderators": MODERATORS
+        "moderators": MODERATORS,
+        "valid_users": VALID_USERS
     }
     try:
         with open(DATA_FILE, "w") as f:
@@ -184,7 +170,7 @@ def check_admin_auth(data):
 def deduct_credits(username, amount):
     """Deduct credits from admin/moderator account (supports decimals)"""
     if username == MASTER_ADMIN["username"]:
-        return True  # Master admin has unlimited credits
+        return True
     
     if username in ADMINS:
         if ADMINS[username]["credits"] >= amount:
@@ -203,7 +189,7 @@ def deduct_credits(username, amount):
     return False
 
 def add_credits(username, amount):
-    """Add credits to admin/moderator account (supports decimals)"""
+    """Add credits to admin/moderator account"""
     if username in ADMINS:
         ADMINS[username]["credits"] = round(ADMINS[username]["credits"] + amount, 2)
         save_data()
@@ -222,6 +208,26 @@ def get_credits(username):
     if username in MODERATORS:
         return MODERATORS[username]["credits"]
     return 0
+
+def get_licenses_by_owner(owner, role):
+    """Get licenses filtered by owner"""
+    if role == "master":
+        # Master sees everything
+        return {
+            "trials": TRIAL_LICENSES,
+            "custom": CUSTOM_ACTIVATIONS,
+            "permanent": PERMANENT_LICENSES
+        }
+    else:
+        # Filter by owner
+        filtered_trials = {k: v for k, v in TRIAL_LICENSES.items() if v.get("owner") == owner}
+        filtered_custom = {k: v for k, v in CUSTOM_ACTIVATIONS.items() if v.get("owner") == owner}
+        filtered_permanent = {k: v for k, v in PERMANENT_LICENSES.items() if v.get("owner") == owner}
+        return {
+            "trials": filtered_trials,
+            "custom": filtered_custom,
+            "permanent": filtered_permanent
+        }
 
 # ==================================================
 # 🔍 MONITORING THREAD
@@ -256,7 +262,7 @@ monitor_thread = threading.Thread(target=monitor_expired_licenses, daemon=True)
 monitor_thread.start()
 
 # ==================================================
-# 🎨 ADMIN PANEL HTML
+# 🎨 ADMIN PANEL HTML (Separate Dashboards)
 # ==================================================
 ADMIN_HTML = """
 <!DOCTYPE html>
@@ -301,8 +307,8 @@ ADMIN_HTML = """
         .modal-content { background: #1a1a2e; margin: 5% auto; padding: 25px; border-radius: 15px; width: 90%; max-width: 600px; }
         .close { float: right; font-size: 28px; cursor: pointer; }
         .credit-badge { background: #10B981; padding: 5px 10px; border-radius: 20px; font-size: 12px; margin-left: 10px; }
-        .warning { color: #F59E0B; }
-        .price-tag { background: rgba(16,185,129,0.3); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
+        .master-only { background: rgba(239,68,68,0.2); border-left: 3px solid #EF4444; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .owner-tag { font-size: 11px; color: #aaa; margin-left: 5px; }
     </style>
 </head>
 <body>
@@ -321,23 +327,22 @@ ADMIN_HTML = """
         <div class="header">
             <h1>⚡ JEPFX ADMIN PANEL</h1>
             <p>Welcome, <span id="currentUser">-</span> | Role: <span id="currentRole">-</span> | Credits: <span id="currentCredits">0</span></p>
+            <div id="masterBadge" style="display: none;" class="master-only">👑 Master Admin - You can see all licenses from all admins</div>
         </div>
         
         <div class="stats-grid" id="statsGrid">
-            <div class="stat-card"><div class="stat-number" id="statTrials">0</div><div>Trial Licenses</div></div>
-            <div class="stat-card"><div class="stat-number" id="statPermanent">0</div><div>Permanent</div></div>
-            <div class="stat-card"><div class="stat-number" id="statCustom">0</div><div>Custom Activations</div></div>
+            <div class="stat-card"><div class="stat-number" id="statTrials">0</div><div>My Trials</div></div>
+            <div class="stat-card"><div class="stat-number" id="statCustom">0</div><div>My Custom</div></div>
+            <div class="stat-card"><div class="stat-number" id="statPermanent">0</div><div>My Permanent</div></div>
             <div class="stat-card"><div class="stat-number" id="statUsage">0</div><div>API Calls</div></div>
         </div>
         
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('generateTrial')">🎲 TRIAL</button>
-            <button class="tab" onclick="switchTab('customActivation')">✨ CUSTOM</button>
+            <button class="tab active" onclick="switchTab('generateTrial')">🎲 CREATE TRIAL</button>
+            <button class="tab" onclick="switchTab('customActivation')">✨ CUSTOM ACTIVATOR</button>
             <button class="tab" onclick="switchTab('permanentLicense')">🔑 PERMANENT</button>
-            <button class="tab" onclick="switchTab('viewTrials')">📋 TRIALS</button>
-            <button class="tab" onclick="switchTab('viewCustom')">👥 CUSTOM LIST</button>
-            <button class="tab" onclick="switchTab('viewPermanent')">📦 PERMANENT LIST</button>
-            <button class="tab" onclick="switchTab('admins')">👨‍💼 ADMINS</button>
+            <button class="tab" onclick="switchTab('myLicenses')">📋 MY LICENSES</button>
+            <div id="adminTab" style="display: none;"><button class="tab" onclick="switchTab('admins')">👨‍💼 MANAGE ADMINS</button></div>
             <button class="tab" onclick="switchTab('changePassword')">🔐 CHANGE PASSWORD</button>
             <button class="tab" onclick="switchTab('monitor')">📈 MONITOR</button>
         </div>
@@ -361,7 +366,7 @@ ADMIN_HTML = """
             <div id="trialResult" class="result-box" style="display: none;"></div>
         </div>
         
-        <!-- Tab: Custom Activation (Multi-PC Supported) -->
+        <!-- Tab: Custom Activation -->
         <div id="customActivation" class="content">
             <h2>✨ Custom Activation (Multi-PC Supported)</h2>
             <input type="text" id="customUsername" placeholder="Username">
@@ -386,7 +391,7 @@ ADMIN_HTML = """
         
         <!-- Tab: Permanent License -->
         <div id="permanentLicense" class="content">
-            <h2>🔑 Permanent License (50 Credits Max)</h2>
+            <h2>🔑 Permanent License (50 Credits)</h2>
             <input type="text" id="permLicenseKey" placeholder="License Key">
             <input type="text" id="permUsername" placeholder="Username (optional)">
             <input type="text" id="permPassword" placeholder="Password (optional)">
@@ -397,46 +402,40 @@ ADMIN_HTML = """
             <div id="permResult" class="result-box" style="display: none;"></div>
         </div>
         
-        <!-- Tab: View Trials -->
-        <div id="viewTrials" class="content">
-            <h2>📋 Trial Licenses</h2>
-            <button onclick="loadTrials()">REFRESH</button>
-            <div id="trialsList"></div>
+        <!-- Tab: My Licenses (Shows only licenses created by this admin) -->
+        <div id="myLicenses" class="content">
+            <h2>📋 My Created Licenses</h2>
+            <div class="tabs" style="margin-bottom: 10px;">
+                <button class="tab" onclick="showLicenseType('trials')">Trial Licenses</button>
+                <button class="tab" onclick="showLicenseType('custom')">Custom Activations</button>
+                <button class="tab" onclick="showLicenseType('permanent')">Permanent Licenses</button>
+            </div>
+            <div id="myTrialsList"></div>
+            <div id="myCustomList" style="display: none;"></div>
+            <div id="myPermanentList" style="display: none;"></div>
         </div>
         
-        <!-- Tab: View Custom Activations -->
-        <div id="viewCustom" class="content">
-            <h2>👥 Custom Activations (Multi-PC)</h2>
-            <button onclick="loadCustomActivations()">REFRESH</button>
-            <div id="customList"></div>
-        </div>
-        
-        <!-- Tab: View Permanent Licenses -->
-        <div id="viewPermanent" class="content">
-            <h2>📦 Permanent Licenses</h2>
-            <button onclick="loadPermanentLicenses()">REFRESH</button>
-            <div id="permanentList"></div>
-        </div>
-        
-        <!-- Tab: Admins Management -->
+        <!-- Tab: Admins Management (Master Only) -->
         <div id="admins" class="content">
-            <h2>👨‍💼 Admin & Moderator Management</h2>
-            <div style="background: rgba(124,58,237,0.2); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-                <h3>➕ Add New Admin/Moderator</h3>
-                <input type="text" id="newAdminUser" placeholder="Username">
-                <input type="password" id="newAdminPass" placeholder="Password">
-                <select id="newAdminRole">
-                    <option value="admin">Admin (Can create licenses, uses credits)</option>
-                    <option value="moderator">Moderator (Limited access, uses credits)</option>
-                </select>
-                <input type="number" id="newAdminCredits" placeholder="Initial Credits" value="100" step="0.5">
-                <button onclick="addAdmin()">ADD USER</button>
+            <div class="master-only">
+                <h2>👑 MASTER ADMIN ONLY</h2>
+                <p>You have access to all licenses and can manage other admins</p>
             </div>
             
-            <h3>📋 Current Admins</h3>
+            <h3>➕ Add New Admin/Moderator</h3>
+            <input type="text" id="newAdminUser" placeholder="Username">
+            <input type="password" id="newAdminPass" placeholder="Password">
+            <select id="newAdminRole">
+                <option value="admin">Admin (Can create licenses, uses credits)</option>
+                <option value="moderator">Moderator (Limited access, uses credits)</option>
+            </select>
+            <input type="number" id="newAdminCredits" placeholder="Initial Credits" value="100" step="0.5">
+            <button onclick="addAdmin()">ADD USER</button>
+            
+            <h3>📋 All Admins</h3>
             <div id="adminsList"></div>
             
-            <h3>📋 Current Moderators</h3>
+            <h3>📋 All Moderators</h3>
             <div id="moderatorsList"></div>
             
             <h3>💰 Credit Management</h3>
@@ -444,13 +443,9 @@ ADMIN_HTML = """
             <input type="number" id="creditAmount" placeholder="Amount (+ or -)" step="0.5">
             <button onclick="manageCredits()">UPDATE CREDITS</button>
             
-            <div class="result-box" style="margin-top: 15px;">
-                <strong>💰 NEW CREDIT PRICING (Max 50 credits):</strong><br>
-                • Trial: 0.5-10 credits (0.1/hour)<br>
-                • Custom: 0.1/hour | 1/day | 5/week | 10/month | 30/year | 50/unlimited<br>
-                • Permanent: 50 credits (LIFETIME)<br>
-                <strong>✨ Credits support decimals for flexible pricing!</strong>
-            </div>
+            <h3>📊 All Licenses (System Wide)</h3>
+            <button onclick="loadAllLicenses()">REFRESH ALL LICENSES</button>
+            <div id="allLicensesList"></div>
         </div>
         
         <!-- Tab: Change Password -->
@@ -465,7 +460,7 @@ ADMIN_HTML = """
         
         <!-- Tab: Monitor -->
         <div id="monitor" class="content">
-            <h2>📈 System Monitor</h2>
+            <h2>📈 My Usage Monitor</h2>
             <button onclick="loadMonitor()">REFRESH</button>
             <div id="monitorData" class="result-box"></div>
         </div>
@@ -503,11 +498,16 @@ ADMIN_HTML = """
             document.getElementById('currentUser').textContent = username;
             document.getElementById('currentRole').textContent = data.role;
             document.getElementById('currentCredits').textContent = data.credits || 'Unlimited';
+            
+            if(data.role === 'master') {
+                document.getElementById('masterBadge').style.display = 'block';
+                document.getElementById('adminTab').style.display = 'block';
+            }
+            
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainPanel').style.display = 'block';
             loadStats();
-            loadTrials();
-            loadAdmins();
+            loadMyLicenses();
         } else {
             document.getElementById('loginError').style.display = 'block';
         }
@@ -519,11 +519,22 @@ ADMIN_HTML = """
         event.target.classList.add('active');
         document.getElementById(tabId).classList.add('active');
         
-        if(tabId === 'viewTrials') loadTrials();
-        if(tabId === 'viewCustom') loadCustomActivations();
-        if(tabId === 'viewPermanent') loadPermanentLicenses();
-        if(tabId === 'admins') loadAdmins();
+        if(tabId === 'myLicenses') loadMyLicenses();
+        if(tabId === 'admins' && currentRole === 'master') {
+            loadAdmins();
+            loadAllLicenses();
+        }
         if(tabId === 'monitor') loadMonitor();
+    }
+    
+    function showLicenseType(type) {
+        document.getElementById('myTrialsList').style.display = 'none';
+        document.getElementById('myCustomList').style.display = 'none';
+        document.getElementById('myPermanentList').style.display = 'none';
+        
+        if(type === 'trials') document.getElementById('myTrialsList').style.display = 'block';
+        if(type === 'custom') document.getElementById('myCustomList').style.display = 'block';
+        if(type === 'permanent') document.getElementById('myPermanentList').style.display = 'block';
     }
     
     async function loadStats() {
@@ -535,8 +546,8 @@ ADMIN_HTML = """
         const data = await res.json();
         if(data.success) {
             document.getElementById('statTrials').textContent = data.trials;
-            document.getElementById('statPermanent').textContent = data.permanent;
             document.getElementById('statCustom').textContent = data.custom;
+            document.getElementById('statPermanent').textContent = data.permanent;
             document.getElementById('statUsage').textContent = data.total_usage;
             document.getElementById('currentCredits').textContent = data.user_credits || 'Unlimited';
         }
@@ -559,7 +570,7 @@ ADMIN_HTML = """
         if(data.success) {
             resultDiv.innerHTML = `✅ TRIAL CREATED!<br>🔑 License: ${data.license_key}<br>👤 User: ${data.username}<br>🔒 Pass: ${data.password}<br>⏱️ Duration: ${duration} hours<br>💰 Credits used: ${data.credits_used}<br>💳 Remaining: ${data.remaining_credits}`;
             loadStats();
-            loadTrials();
+            loadMyLicenses();
         } else {
             resultDiv.innerHTML = `❌ ERROR: ${data.error}`;
         }
@@ -600,7 +611,7 @@ ADMIN_HTML = """
             document.getElementById('customLicense').value = '';
             document.getElementById('customDurationValue').value = '';
             loadStats();
-            loadCustomActivations();
+            loadMyLicenses();
         } else {
             resultDiv.innerHTML = `❌ ERROR: ${data.error}`;
         }
@@ -636,14 +647,20 @@ ADMIN_HTML = """
             document.getElementById('permUsername').value = '';
             document.getElementById('permPassword').value = '';
             loadStats();
-            loadPermanentLicenses();
+            loadMyLicenses();
         } else {
             resultDiv.innerHTML = `❌ ERROR: ${data.error}`;
         }
     }
     
-    async function loadTrials() {
-        const res = await fetch(API_URL + '/api/admin/get-all-trials', {
+    async function loadMyLicenses() {
+        await loadMyTrials();
+        await loadMyCustom();
+        await loadMyPermanent();
+    }
+    
+    async function loadMyTrials() {
+        const res = await fetch(API_URL + '/api/admin/get-my-trials', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
@@ -659,39 +676,38 @@ ADMIN_HTML = """
                         <td>${trial.status}</td>
                         <td>${trial.usage_count || 0}</td>
                         <td><button class="btn-danger" onclick="event.stopPropagation(); deleteTrial('${trial.license_key}')">Delete</button></td>
-                    </tr>`;
+                     </tr>`;
         });
         html += '</table>';
-        document.getElementById('trialsList').innerHTML = html;
+        document.getElementById('myTrialsList').innerHTML = html;
     }
     
-    async function loadCustomActivations() {
-        const res = await fetch(API_URL + '/api/admin/get-custom-activations', {
+    async function loadMyCustom() {
+        const res = await fetch(API_URL + '/api/admin/get-my-custom', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>License Key</th><th>Username</th><th>HWIDs Count</th><th>HWIDs List</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
+        let html = '<table><tr><th>License Key</th><th>Username</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.activations.forEach(act => {
             const hwidList = act.hwids || [];
             html += `<tr onclick="showUsageDetails('${act.license_key}')">
                         <td>${act.license_key}</td>
                         <td>${act.username}</td>
-                        <td>${hwidList.length}</td>
-                        <td style="font-size: 11px;">${hwidList.slice(0,3).join('<br>')}${hwidList.length > 3 ? '<br>+' + (hwidList.length-3) + ' more' : ''}</td>
+                        <td>${hwidList.length} device(s)</td>
                         <td>${act.expires_at || 'NEVER'}</td>
                         <td class="${act.status === 'ACTIVE' ? 'success' : 'warning'}">${act.status}</td>
                         <td>${act.usage_count || 0}</td>
                         <td><button class="btn-danger" onclick="event.stopPropagation(); deleteCustomActivation('${act.license_key}')">Delete</button></td>
-                    </tr>`;
+                     </tr>`;
         });
         html += '</table>';
-        document.getElementById('customList').innerHTML = html;
+        document.getElementById('myCustomList').innerHTML = html;
     }
     
-    async function loadPermanentLicenses() {
-        const res = await fetch(API_URL + '/api/admin/get-permanent-licenses', {
+    async function loadMyPermanent() {
+        const res = await fetch(API_URL + '/api/admin/get-my-permanent', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
@@ -708,10 +724,10 @@ ADMIN_HTML = """
                         <td>${lic.status}</td>
                         <td>${lic.usage_count || 0}</td>
                         <td><button class="btn-danger" onclick="event.stopPropagation(); deletePermanentLicense('${lic.license_key}')">Delete</button></td>
-                    </tr>`;
+                     </tr>`;
         });
         html += '</table>';
-        document.getElementById('permanentList').innerHTML = html;
+        document.getElementById('myPermanentList').innerHTML = html;
     }
     
     async function loadAdmins() {
@@ -722,21 +738,53 @@ ADMIN_HTML = """
         });
         const data = await res.json();
         
-        let adminsHtml = '<table><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
+        let adminsHtml = '<tr> hilab<th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
         data.admins.forEach(admin => {
-            adminsHtml += `<tr><td>${admin.username}</td><td>${admin.credits}</td><td>${admin.created_at || '-'}</td>
-                           <td><button class="btn-danger" onclick="deleteAdmin('${admin.username}')">Delete</button></td></tr>`;
+            adminsHtml += `<tr>
+                <td>${admin.username}</td>
+                <td>${admin.credits}</td>
+                <td>${admin.created_at || '-'}</td>
+                <td><button class="btn-danger" onclick="deleteAdmin('${admin.username}')">Delete</button></td>
+            </tr>`;
         });
         adminsHtml += '</table>';
         document.getElementById('adminsList').innerHTML = adminsHtml;
         
         let modsHtml = '<table><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
         data.moderators.forEach(mod => {
-            modsHtml += `<tr><td>${mod.username}</td><td>${mod.credits}</td><td>${mod.created_at || '-'}</td>
-                         <td><button class="btn-danger" onclick="deleteModerator('${mod.username}')">Delete</button></td></tr>`;
+            modsHtml += `<tr>
+                <td>${mod.username}</td>
+                <td>${mod.credits}</td>
+                <td>${mod.created_at || '-'}</td>
+                <td><button class="btn-danger" onclick="deleteModerator('${mod.username}')">Delete</button></td>
+             </tr>`;
         });
-        modsHtml += '</tr>';
+        modsHtml += '</table>';
         document.getElementById('moderatorsList').innerHTML = modsHtml;
+    }
+    
+    async function loadAllLicenses() {
+        const res = await fetch(API_URL + '/api/admin/get-all-licenses', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
+        });
+        const data = await res.json();
+        
+        let html = '<h4>All Trial Licenses</h4><table><tr><th>License Key</th><th>Owner</th><th>HWIDs</th><th>Expires</th><th>Status</th></tr>';
+        data.all_trials.forEach(trial => {
+            html += `<tr><td>${trial.license_key}</td><td>${trial.owner || 'Unknown'}</td><td>${trial.hwid_count}</td><td>${trial.expires_at || '-'}</td><td>${trial.status}</td></tr>`;
+        });
+        html += '</table><h4>All Custom Activations</h4><table><tr><th>License Key</th><th>Owner</th><th>Username</th><th>HWIDs</th><th>Expires</th></tr>';
+        data.all_custom.forEach(custom => {
+            html += `<tr><td>${custom.license_key}</td><td>${custom.owner || 'Unknown'}</td><td>${custom.username}</td><td>${custom.hwid_count}</td><td>${custom.expires_at || 'NEVER'}</td></tr>`;
+        });
+        html += '</table><h4>All Permanent Licenses</h4><table><tr><th>License Key</th><th>Owner</th><th>Username</th><th>HWIDs</th></tr>';
+        data.all_permanent.forEach(perm => {
+            html += `<tr><td>${perm.license_key}</td><td>${perm.owner || 'Unknown'}</td><td>${perm.username || '-'}</td><td>${perm.hwid_count}</td></tr>`;
+        });
+        html += '</table>';
+        document.getElementById('allLicensesList').innerHTML = html;
     }
     
     async function addAdmin() {
@@ -865,7 +913,7 @@ ADMIN_HTML = """
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, license_key: key})
         });
-        loadTrials();
+        loadMyTrials();
         loadStats();
     }
     
@@ -876,7 +924,7 @@ ADMIN_HTML = """
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, license_key: key})
         });
-        loadCustomActivations();
+        loadMyCustom();
         loadStats();
     }
     
@@ -887,7 +935,7 @@ ADMIN_HTML = """
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, license_key: key})
         });
-        loadPermanentLicenses();
+        loadMyPermanent();
         loadStats();
     }
     
@@ -921,11 +969,12 @@ ADMIN_HTML = """
         });
         const data = await res.json();
         document.getElementById('monitorData').innerHTML = `
-            📊 SYSTEM STATUS<br><br>
-            🔹 Active Licenses: ${data.active_licenses}<br>
-            🔹 Total API Calls: ${data.total_api_calls}<br>
-            🔹 Active Users (HWIDs): ${data.active_users}<br>
-            🔹 Expired: ${data.expired_count}<br><br>
+            📊 MY USAGE STATISTICS<br><br>
+            🔹 My Trial Licenses: ${data.my_trials}<br>
+            🔹 My Custom Activations: ${data.my_custom}<br>
+            🔹 My Permanent Licenses: ${data.my_permanent}<br>
+            🔹 Total API Calls from my licenses: ${data.my_api_calls}<br>
+            🔹 Active Users (HWIDs): ${data.active_users}<br><br>
             ⏰ Server Time: ${data.server_time}
         `;
     }
@@ -945,7 +994,7 @@ ADMIN_HTML = """
 """
 
 # ==================================================
-# 🔐 API ENDPOINTS
+# 🔐 API ENDPOINTS (With Owner Tracking)
 # ==================================================
 
 @app.route('/api/admin/login', methods=['POST'])
@@ -1000,16 +1049,23 @@ def get_stats():
     if not auth["authorized"]:
         return jsonify({"success": False, "error": "Unauthorized"}), 401
     
-    total_usage = sum(len(logs) for logs in USAGE_LOGS.values())
-    user_credits = auth.get("credits", "Unlimited")
+    licenses = get_licenses_by_owner(auth["username"], auth["role"])
+    
+    total_usage = 0
+    for key in licenses["trials"]:
+        total_usage += len(USAGE_LOGS.get(key, []))
+    for key in licenses["custom"]:
+        total_usage += len(USAGE_LOGS.get(key, []))
+    for key in licenses["permanent"]:
+        total_usage += len(USAGE_LOGS.get(key, []))
     
     return jsonify({
         "success": True,
-        "trials": len(TRIAL_LICENSES),
-        "permanent": len(PERMANENT_LICENSES),
-        "custom": len(CUSTOM_ACTIVATIONS),
+        "trials": len(licenses["trials"]),
+        "custom": len(licenses["custom"]),
+        "permanent": len(licenses["permanent"]),
         "total_usage": total_usage,
-        "user_credits": user_credits
+        "user_credits": auth.get("credits", "Unlimited")
     }), 200
 
 @app.route('/api/admin/generate-trial', methods=['POST'])
@@ -1020,11 +1076,8 @@ def generate_trial():
         return jsonify({"success": False, "error": "Unauthorized"}), 401
     
     dur = int(data.get("duration_hours", 3))
-    
-    # Calculate credit cost (0.1 credits per hour)
     credits_cost = round(dur * 0.1, 2)
     
-    # Check credits
     if auth["role"] != "master":
         if not deduct_credits(auth["username"], credits_cost):
             return jsonify({"success": False, "error": f"Insufficient credits. Need {credits_cost} credits"}), 400
@@ -1035,6 +1088,7 @@ def generate_trial():
     
     TRIAL_LICENSES[lic] = {
         "type": "trial",
+        "owner": auth["username"],
         "hwids": [],
         "duration_hours": dur,
         "start_time": None,
@@ -1072,7 +1126,6 @@ def create_custom_activation():
     if not username or not password or not license_key:
         return jsonify({"success": False, "error": "Missing required fields"}), 400
     
-    # Calculate credit cost and expiry
     now = datetime.utcnow()
     expires_at = None
     credits_cost = 0
@@ -1096,25 +1149,22 @@ def create_custom_activation():
         credits_cost = CREDIT_PRICING["custom_unlimited"]
         expires_at = None
     
-    # Check credits
     if auth["role"] != "master":
         if not deduct_credits(auth["username"], credits_cost):
             return jsonify({"success": False, "error": f"Insufficient credits. Need {credits_cost} credits"}), 400
     
-    # Store custom activation (supports multiple HWIDs)
     CUSTOM_ACTIVATIONS[license_key] = {
         "username": username,
         "password": password,
         "license_key": license_key,
+        "owner": auth["username"],
         "hwids": [],
         "expires_at": expires_at.isoformat() if expires_at else None,
         "created_at": now.isoformat(),
         "activated": False
     }
     
-    # Add to valid users
     VALID_USERS[username] = password
-    
     save_data()
     
     remaining = get_credits(auth["username"])
@@ -1140,13 +1190,13 @@ def create_permanent_license():
     if not license_key:
         return jsonify({"success": False, "error": "License key required"}), 400
     
-    # Check credits (50 credits for permanent)
     if auth["role"] != "master":
         if not deduct_credits(auth["username"], CREDIT_PRICING["permanent"]):
             return jsonify({"success": False, "error": f"Insufficient credits. Need {CREDIT_PRICING['permanent']} credits"}), 400
     
     PERMANENT_LICENSES[license_key] = {
         "type": "permanent",
+        "owner": auth["username"],
         "username": username if username else None,
         "password": password if password else None,
         "hwids": [],
@@ -1166,8 +1216,12 @@ def create_permanent_license():
         "remaining_credits": remaining
     }), 200
 
-@app.route('/api/admin/get-all-trials', methods=['POST'])
-def get_all_trials():
+# ==================================================
+# 📋 MY LICENSES ENDPOINTS (Filtered by owner)
+# ==================================================
+
+@app.route('/api/admin/get-my-trials', methods=['POST'])
+def get_my_trials():
     data = request.get_json()
     auth = check_admin_auth(data)
     if not auth["authorized"]:
@@ -1175,6 +1229,95 @@ def get_all_trials():
     
     now = datetime.utcnow()
     list_trials = []
+    
+    for k, v in TRIAL_LICENSES.items():
+        if v.get("owner") == auth["username"] or auth["role"] == "master":
+            status = "NOT ACTIVATED"
+            if v.get("expires_at"):
+                exp = datetime.fromisoformat(v["expires_at"])
+                if exp > now:
+                    status = "ACTIVE"
+                else:
+                    status = "EXPIRED"
+            
+            usage_count = len(USAGE_LOGS.get(k, []))
+            hwid_count = len(v.get("hwids", []))
+            
+            list_trials.append({
+                "license_key": k,
+                "duration_hours": f"{v['duration_hours']}h",
+                "hwid_count": hwid_count,
+                "expires_at": v.get("expires_at") or "-",
+                "status": status,
+                "usage_count": usage_count
+            })
+    
+    return jsonify({"trials": list_trials}), 200
+
+@app.route('/api/admin/get-my-custom', methods=['POST'])
+def get_my_custom():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    now = datetime.utcnow()
+    list_custom = []
+    
+    for k, v in CUSTOM_ACTIVATIONS.items():
+        if v.get("owner") == auth["username"] or auth["role"] == "master":
+            status = "ACTIVE"
+            if v.get("expires_at"):
+                exp = datetime.fromisoformat(v["expires_at"])
+                if now > exp:
+                    status = "EXPIRED"
+            
+            usage_count = len(USAGE_LOGS.get(k, []))
+            
+            list_custom.append({
+                "license_key": k,
+                "username": v.get("username"),
+                "hwids": v.get("hwids", []),
+                "expires_at": v.get("expires_at") or "UNLIMITED",
+                "status": status,
+                "usage_count": usage_count
+            })
+    
+    return jsonify({"activations": list_custom}), 200
+
+@app.route('/api/admin/get-my-permanent', methods=['POST'])
+def get_my_permanent():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    list_permanent = []
+    
+    for k, v in PERMANENT_LICENSES.items():
+        if v.get("owner") == auth["username"] or auth["role"] == "master":
+            usage_count = len(USAGE_LOGS.get(k, []))
+            
+            list_permanent.append({
+                "license_key": k,
+                "username": v.get("username"),
+                "hwids": v.get("hwids", []),
+                "expires_at": v.get("expires_at") or "UNLIMITED",
+                "status": "ACTIVE",
+                "usage_count": usage_count
+            })
+    
+    return jsonify({"licenses": list_permanent}), 200
+
+@app.route('/api/admin/get-all-licenses', methods=['POST'])
+def get_all_licenses():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"] or auth["role"] != "master":
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    now = datetime.utcnow()
+    all_trials = []
     for k, v in TRIAL_LICENSES.items():
         status = "NOT ACTIVATED"
         if v.get("expires_at"):
@@ -1184,69 +1327,38 @@ def get_all_trials():
             else:
                 status = "EXPIRED"
         
-        usage_count = len(USAGE_LOGS.get(k, []))
-        hwid_count = len(v.get("hwids", []))
-        
-        list_trials.append({
+        all_trials.append({
             "license_key": k,
-            "duration_hours": f"{v['duration_hours']}h",
-            "hwid_count": hwid_count,
+            "owner": v.get("owner", "Unknown"),
+            "hwid_count": len(v.get("hwids", [])),
             "expires_at": v.get("expires_at") or "-",
-            "status": status,
-            "usage_count": usage_count
+            "status": status
         })
-    return jsonify({"trials": list_trials}), 200
-
-@app.route('/api/admin/get-custom-activations', methods=['POST'])
-def get_custom_activations():
-    data = request.get_json()
-    auth = check_admin_auth(data)
-    if not auth["authorized"]:
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
     
-    now = datetime.utcnow()
-    activations_list = []
+    all_custom = []
     for k, v in CUSTOM_ACTIVATIONS.items():
-        status = "ACTIVE"
-        if v.get("expires_at"):
-            exp = datetime.fromisoformat(v["expires_at"])
-            if now > exp:
-                status = "EXPIRED"
-        
-        usage_count = len(USAGE_LOGS.get(k, []))
-        hwids = v.get("hwids", [])
-        
-        activations_list.append({
+        all_custom.append({
             "license_key": k,
+            "owner": v.get("owner", "Unknown"),
             "username": v.get("username"),
-            "hwids": hwids,
-            "expires_at": v.get("expires_at") or "UNLIMITED",
-            "status": status,
-            "usage_count": usage_count
+            "hwid_count": len(v.get("hwids", [])),
+            "expires_at": v.get("expires_at") or "NEVER"
         })
-    return jsonify({"activations": activations_list}), 200
-
-@app.route('/api/admin/get-permanent-licenses', methods=['POST'])
-def get_permanent_licenses():
-    data = request.get_json()
-    auth = check_admin_auth(data)
-    if not auth["authorized"]:
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
     
-    licenses_list = []
+    all_permanent = []
     for k, v in PERMANENT_LICENSES.items():
-        usage_count = len(USAGE_LOGS.get(k, []))
-        hwids = v.get("hwids", [])
-        
-        licenses_list.append({
+        all_permanent.append({
             "license_key": k,
+            "owner": v.get("owner", "Unknown"),
             "username": v.get("username"),
-            "hwids": hwids,
-            "expires_at": v.get("expires_at") or "UNLIMITED",
-            "status": "ACTIVE",
-            "usage_count": usage_count
+            "hwid_count": len(v.get("hwids", []))
         })
-    return jsonify({"licenses": licenses_list}), 200
+    
+    return jsonify({
+        "all_trials": all_trials,
+        "all_custom": all_custom,
+        "all_permanent": all_permanent
+    }), 200
 
 @app.route('/api/admin/get-admins', methods=['POST'])
 def get_admins():
@@ -1337,17 +1449,133 @@ def delete_admin():
     
     return jsonify({"success": False, "error": "User not found"}), 404
 
-def get_credits(username):
-    if username == MASTER_ADMIN["username"]:
-        return "Unlimited"
-    if username in ADMINS:
-        return ADMINS[username]["credits"]
-    if username in MODERATORS:
-        return MODERATORS[username]["credits"]
-    return 0
+@app.route('/api/admin/get-monitor-data', methods=['POST'])
+def get_monitor_data():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    licenses = get_licenses_by_owner(auth["username"], auth["role"])
+    
+    my_api_calls = 0
+    for key in licenses["trials"]:
+        my_api_calls += len(USAGE_LOGS.get(key, []))
+    for key in licenses["custom"]:
+        my_api_calls += len(USAGE_LOGS.get(key, []))
+    for key in licenses["permanent"]:
+        my_api_calls += len(USAGE_LOGS.get(key, []))
+    
+    active_users = set()
+    for logs in USAGE_LOGS.values():
+        for log in logs[-10:]:
+            if "hwid" in log.get("details", {}):
+                active_users.add(log["details"]["hwid"])
+    
+    return jsonify({
+        "my_trials": len(licenses["trials"]),
+        "my_custom": len(licenses["custom"]),
+        "my_permanent": len(licenses["permanent"]),
+        "my_api_calls": my_api_calls,
+        "active_users": len(active_users),
+        "server_time": datetime.utcnow().isoformat()
+    }), 200
+
+@app.route('/api/admin/delete-trial', methods=['POST'])
+def delete_trial():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    key = data.get("license_key", "")
+    
+    if key in TRIAL_LICENSES:
+        # Check ownership
+        if auth["role"] != "master" and TRIAL_LICENSES[key].get("owner") != auth["username"]:
+            return jsonify({"success": False, "error": "Not your license"}), 403
+        
+        for user, user_data in list(TRIAL_USERS.items()):
+            if user_data.get("linked_license") == key:
+                del TRIAL_USERS[user]
+        del TRIAL_LICENSES[key]
+        save_data()
+        return jsonify({"success": True}), 200
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+@app.route('/api/admin/delete-custom-activation', methods=['POST'])
+def delete_custom_activation():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    key = data.get("license_key", "")
+    
+    if key in CUSTOM_ACTIVATIONS:
+        if auth["role"] != "master" and CUSTOM_ACTIVATIONS[key].get("owner") != auth["username"]:
+            return jsonify({"success": False, "error": "Not your license"}), 403
+        
+        del CUSTOM_ACTIVATIONS[key]
+        save_data()
+        return jsonify({"success": True}), 200
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+@app.route('/api/admin/delete-permanent-license', methods=['POST'])
+def delete_permanent_license():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    key = data.get("license_key", "")
+    
+    if key in PERMANENT_LICENSES:
+        if auth["role"] != "master" and PERMANENT_LICENSES[key].get("owner") != auth["username"]:
+            return jsonify({"success": False, "error": "Not your license"}), 403
+        
+        del PERMANENT_LICENSES[key]
+        save_data()
+        return jsonify({"success": True}), 200
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+@app.route('/api/admin/get-license-usage', methods=['POST'])
+def get_license_usage():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    license_key = data.get("license_key", "")
+    
+    # Check if user has access to this license
+    has_access = False
+    if auth["role"] == "master":
+        has_access = True
+    else:
+        if license_key in TRIAL_LICENSES and TRIAL_LICENSES[license_key].get("owner") == auth["username"]:
+            has_access = True
+        elif license_key in CUSTOM_ACTIVATIONS and CUSTOM_ACTIVATIONS[license_key].get("owner") == auth["username"]:
+            has_access = True
+        elif license_key in PERMANENT_LICENSES and PERMANENT_LICENSES[license_key].get("owner") == auth["username"]:
+            has_access = True
+    
+    if not has_access:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    stats = get_usage_stats(license_key)
+    
+    return jsonify({
+        "total_usage": stats["total_usage"],
+        "activations": stats["total_activations"],
+        "verifications": stats["total_verifications"],
+        "last_used": stats["last_used"],
+        "unique_hwids": len(stats["unique_hwids"]),
+        "hwid_list": stats["unique_hwids"]
+    }), 200
 
 # ==================================================
-# 🔑 ACTIVATION ENDPOINTS (Multi-PC Support)
+# 🔑 ACTIVATION ENDPOINTS (Same as before)
 # ==================================================
 
 @app.route('/api/activate', methods=['POST'])
@@ -1357,7 +1585,6 @@ def activate():
     hwid = data.get("hardware_id", "").strip()
     now = datetime.utcnow()
     
-    # Check Custom Activations (Multi-PC support)
     if key in CUSTOM_ACTIVATIONS:
         activation = CUSTOM_ACTIVATIONS[key]
         
@@ -1377,10 +1604,9 @@ def activate():
         
         return jsonify({
             "status": "activated",
-            "msg": f"Activated on {len(activation['hwids'])} device(s). Expires: {activation['expires_at'] or 'NEVER'}"
+            "msg": f"Activated on {len(activation['hwids'])} device(s)"
         }), 200
     
-    # Check Permanent Licenses (Multi-PC support)
     if key in PERMANENT_LICENSES:
         lic = PERMANENT_LICENSES[key]
         
@@ -1394,7 +1620,6 @@ def activate():
         log_usage(key, "activation", {"hwid": hwid})
         return jsonify({"status": "activated", "msg": f"Activated on {len(lic['hwids'])} device(s)"}), 200
     
-    # Check Trial Licenses
     if key in TRIAL_LICENSES:
         lic = TRIAL_LICENSES[key]
         
@@ -1417,7 +1642,6 @@ def activate():
         log_usage(key, "activation", {"hwid": hwid})
         return jsonify({"status": "activated", "msg": f"Trial activated on {len(lic['hwids'])} device(s)"}), 200
     
-    # Check Original Licenses
     if key in LICENSES:
         lic = LICENSES[key]
         if lic["type"] == "unlimited":
@@ -1442,7 +1666,6 @@ def verify():
     key_hash = data.get("hash", "")
     now = datetime.utcnow()
     
-    # Verify Custom Activations
     for key, activation in CUSTOM_ACTIVATIONS.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
             if activation.get("expires_at"):
@@ -1454,7 +1677,6 @@ def verify():
                 return jsonify({"ok": True}), 200
             return jsonify({"invalid": True}), 403
     
-    # Verify Permanent Licenses
     for key, lic in PERMANENT_LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
             if hwid in lic.get("hwids", []):
@@ -1462,7 +1684,6 @@ def verify():
                 return jsonify({"ok": True}), 200
             return jsonify({"invalid": True}), 403
     
-    # Verify Trial Licenses
     for key, lic in TRIAL_LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
             if lic.get("expires_at"):
@@ -1474,7 +1695,6 @@ def verify():
                 return jsonify({"ok": True}), 200
             return jsonify({"invalid": True}), 403
     
-    # Verify original licenses
     for key, lic in LICENSES.items():
         if hashlib.sha256(key.encode()).hexdigest() == key_hash:
             if lic["type"] == "unlimited" and hwid in lic["hwid"]:
@@ -1515,93 +1735,6 @@ def check_pass():
         return jsonify({"ok": True}), 200
     
     return "", 403
-
-@app.route('/api/admin/get-license-usage', methods=['POST'])
-def get_license_usage():
-    data = request.get_json()
-    auth = check_admin_auth(data)
-    if not auth["authorized"]:
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
-    
-    license_key = data.get("license_key", "")
-    stats = get_usage_stats(license_key)
-    
-    return jsonify({
-        "total_usage": stats["total_usage"],
-        "activations": stats["total_activations"],
-        "verifications": stats["total_verifications"],
-        "last_used": stats["last_used"],
-        "unique_hwids": len(stats["unique_hwids"]),
-        "hwid_list": stats["unique_hwids"]
-    }), 200
-
-@app.route('/api/admin/get-monitor-data', methods=['POST'])
-def get_monitor_data():
-    data = request.get_json()
-    auth = check_admin_auth(data)
-    if not auth["authorized"]:
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
-    
-    total_api_calls = sum(len(logs) for logs in USAGE_LOGS.values())
-    active_users = set()
-    
-    for logs in USAGE_LOGS.values():
-        for log in logs[-10:]:
-            if "hwid" in log.get("details", {}):
-                active_users.add(log["details"]["hwid"])
-    
-    return jsonify({
-        "active_licenses": len(TRIAL_LICENSES) + len(PERMANENT_LICENSES) + len(CUSTOM_ACTIVATIONS),
-        "total_api_calls": total_api_calls,
-        "active_users": len(active_users),
-        "expired_count": 0,
-        "server_time": datetime.utcnow().isoformat()
-    }), 200
-
-@app.route('/api/admin/delete-trial', methods=['POST'])
-def delete_trial():
-    data = request.get_json()
-    auth = check_admin_auth(data)
-    if not auth["authorized"]:
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
-    
-    key = data.get("license_key", "")
-    if key in TRIAL_LICENSES:
-        for user, user_data in list(TRIAL_USERS.items()):
-            if user_data.get("linked_license") == key:
-                del TRIAL_USERS[user]
-        del TRIAL_LICENSES[key]
-        save_data()
-        return jsonify({"success": True}), 200
-    return jsonify({"success": False, "error": "Not found"}), 404
-
-@app.route('/api/admin/delete-custom-activation', methods=['POST'])
-def delete_custom_activation():
-    data = request.get_json()
-    auth = check_admin_auth(data)
-    if not auth["authorized"]:
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
-    
-    key = data.get("license_key", "")
-    if key in CUSTOM_ACTIVATIONS:
-        del CUSTOM_ACTIVATIONS[key]
-        save_data()
-        return jsonify({"success": True}), 200
-    return jsonify({"success": False, "error": "Not found"}), 404
-
-@app.route('/api/admin/delete-permanent-license', methods=['POST'])
-def delete_permanent_license():
-    data = request.get_json()
-    auth = check_admin_auth(data)
-    if not auth["authorized"]:
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
-    
-    key = data.get("license_key", "")
-    if key in PERMANENT_LICENSES:
-        del PERMANENT_LICENSES[key]
-        save_data()
-        return jsonify({"success": True}), 200
-    return jsonify({"success": False, "error": "Not found"}), 404
 
 @app.route('/admin')
 def admin_page():
