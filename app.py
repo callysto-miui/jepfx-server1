@@ -62,8 +62,8 @@ CREDIT_PRICING = {
     "custom_week": 5,
     "custom_month": 10,
     "custom_year": 30,
-    "custom_unlimited": 50,
-    "permanent": 50
+    "custom_unlimited": 500,
+    "permanent": 500
 }
 
 TELEGRAM_CONTACT = "t.me/JEPFX_0"
