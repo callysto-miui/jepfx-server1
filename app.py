@@ -44,9 +44,10 @@ USAGE_LOGS = {}
 LICENSE_HISTORY = []
 
 # ==================================================
-# 📨 USER REQUESTS
+# 📨 USER REQUESTS & REGISTRATIONS
 # ==================================================
-USER_REQUESTS = []
+USER_REQUESTS = []  # Extension/reactivation requests
+USER_REGISTRATIONS = []  # New user registration requests
 
 VALID_USERS = {
     "JEPFX": "@JEPFX_1875",
@@ -72,7 +73,7 @@ TELEGRAM_CONTACT = "t.me/JEPFX_0"
 # 💾 SAVE / LOAD DATA
 # ==================================================
 def load_data():
-    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS, VALID_USERS, LICENSE_HISTORY, USER_REQUESTS
+    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS, VALID_USERS, LICENSE_HISTORY, USER_REQUESTS, USER_REGISTRATIONS
     
     if os.path.exists(DATA_FILE):
         try:
@@ -88,7 +89,8 @@ def load_data():
                 VALID_USERS.update(data.get("valid_users", {}))
                 LICENSE_HISTORY = data.get("license_history", [])
                 USER_REQUESTS = data.get("user_requests", [])
-            print(f"✅ DATA LOADED: {len(LICENSE_HISTORY)} licenses, {len(USER_REQUESTS)} requests")
+                USER_REGISTRATIONS = data.get("user_registrations", [])
+            print(f"✅ DATA LOADED: {len(LICENSE_HISTORY)} licenses, {len(USER_REQUESTS)} requests, {len(USER_REGISTRATIONS)} registrations")
         except Exception as e:
             print(f"⚠️ LOAD ERROR: {e}")
             reset_data()
@@ -96,7 +98,7 @@ def load_data():
         reset_data()
 
 def reset_data():
-    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS, LICENSE_HISTORY, USER_REQUESTS
+    global TRIAL_LICENSES, TRIAL_USERS, PERMANENT_LICENSES, CUSTOM_ACTIVATIONS, USAGE_LOGS, ADMINS, MODERATORS, LICENSE_HISTORY, USER_REQUESTS, USER_REGISTRATIONS
     TRIAL_LICENSES = {}
     TRIAL_USERS = {}
     PERMANENT_LICENSES = {}
@@ -106,6 +108,7 @@ def reset_data():
     MODERATORS = {}
     LICENSE_HISTORY = []
     USER_REQUESTS = []
+    USER_REGISTRATIONS = []
     save_data()
 
 def save_data():
@@ -119,7 +122,8 @@ def save_data():
         "moderators": MODERATORS,
         "valid_users": VALID_USERS,
         "license_history": LICENSE_HISTORY,
-        "user_requests": USER_REQUESTS
+        "user_requests": USER_REQUESTS,
+        "user_registrations": USER_REGISTRATIONS
     }
     try:
         with open(DATA_FILE, "w") as f:
@@ -311,7 +315,302 @@ monitor_thread = threading.Thread(target=monitor_expired_licenses, daemon=True)
 monitor_thread.start()
 
 # ==================================================
-# 🎨 ADMIN PANEL HTML (Full version)
+# 🎨 USER PORTAL HTML (With Registration)
+# ==================================================
+USER_PORTAL_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JEPFX License Portal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
+        body { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); min-height: 100vh; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { color: #7C3AED; font-size: 32px; }
+        .header p { color: #aaa; }
+        .card { background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border-radius: 15px; padding: 25px; margin-bottom: 20px; }
+        .card h2 { color: #7C3AED; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 10px; }
+        input, select, textarea { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(0,0,0,0.3); color: white; }
+        button { background: #7C3AED; color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        button:hover { background: #6D28D9; transform: translateY(-2px); }
+        .status-box { background: rgba(0,0,0,0.5); border-radius: 10px; padding: 15px; margin: 15px 0; border-left: 3px solid #7C3AED; }
+        .status-active { border-left-color: #10B981; }
+        .status-expired { border-left-color: #EF4444; }
+        .status-warning { border-left-color: #F59E0B; }
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .info-label { color: #aaa; }
+        .info-value { color: white; font-weight: bold; }
+        .contact-buttons { display: flex; gap: 10px; margin-top: 20px; }
+        .contact-btn { flex: 1; text-align: center; text-decoration: none; padding: 12px; border-radius: 8px; color: white; font-weight: bold; }
+        .telegram-btn { background: #0088cc; }
+        .telegram-btn:hover { background: #006699; }
+        .request-form { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2); }
+        .request-form.show { display: block; }
+        .alert-success { background: rgba(16,185,129,0.2); border: 1px solid #10B981; color: #10B981; padding: 12px; border-radius: 8px; margin: 10px 0; }
+        .alert-error { background: rgba(239,68,68,0.2); border: 1px solid #EF4444; color: #EF4444; padding: 12px; border-radius: 8px; margin: 10px 0; }
+        .alert-info { background: rgba(59,130,246,0.2); border: 1px solid #3B82F6; color: #3B82F6; padding: 12px; border-radius: 8px; margin: 10px 0; }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .badge-active { background: #10B981; color: white; }
+        .badge-expired { background: #EF4444; color: white; }
+        .badge-warning { background: #F59E0B; color: white; }
+        .hidden { display: none; }
+        .loading { text-align: center; padding: 20px; }
+        .spinner { border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid #7C3AED; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .tab-btn { background: rgba(255,255,255,0.1); padding: 10px 20px; border: none; border-radius: 8px; color: white; cursor: pointer; margin: 5px; }
+        .tab-btn.active { background: #7C3AED; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🔑 JEPFX License Portal</h1>
+        <p>Register for a license, check status, or request support</p>
+    </div>
+    
+    <!-- Tabs -->
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button class="tab-btn active" onclick="showTab('login')">🔐 Login</button>
+        <button class="tab-btn" onclick="showTab('register')">📝 Register</button>
+    </div>
+    
+    <!-- Login Section -->
+    <div id="loginSection" class="card">
+        <h2>🔐 License Login</h2>
+        <p>Already have a license? Login to check status.</p>
+        <input type="text" id="loginUsername" placeholder="Username">
+        <input type="password" id="loginPassword" placeholder="Password">
+        <button onclick="checkLicense()">CHECK LICENSE STATUS</button>
+        <div id="loginError" class="alert-error" style="display: none;"></div>
+    </div>
+    
+    <!-- Register Section -->
+    <div id="registerSection" class="card hidden">
+        <h2>📝 Register for License</h2>
+        <p>Create an account and request a license. Admin will approve and send your credentials.</p>
+        <input type="text" id="regUsername" placeholder="Desired Username *">
+        <input type="password" id="regPassword" placeholder="Desired Password *">
+        <input type="text" id="regTelegram" placeholder="Telegram Username (e.g., @username) *">
+        <input type="text" id="regFacebook" placeholder="Facebook Profile (optional)">
+        <textarea id="regReason" rows="3" placeholder="Why do you need a license? (optional)"></textarea>
+        <button onclick="registerUser()">SUBMIT REGISTRATION</button>
+        <div id="registerResult" class="alert-info" style="display: none;"></div>
+    </div>
+    
+    <!-- Status Section (Hidden initially) -->
+    <div id="statusSection" class="card hidden">
+        <div id="statusContent"></div>
+        <div id="requestForm" class="request-form">
+            <h3>📨 Request Extension / Reactivation</h3>
+            <select id="requestType">
+                <option value="extension">Extension (Add more days)</option>
+                <option value="reactivation">Reactivation (Reset HWID)</option>
+                <option value="other">Other Request</option>
+            </select>
+            <input type="number" id="requestDays" placeholder="Days to add (if extension)" value="7">
+            <textarea id="requestMessage" rows="3" placeholder="Describe your request..."></textarea>
+            <button onclick="submitRequest()">SUBMIT REQUEST</button>
+            <div id="requestResult" class="alert-info" style="display: none;"></div>
+        </div>
+        <div class="contact-buttons">
+            <a href="https://t.me/JEPFX_0" target="_blank" class="contact-btn telegram-btn">📱 Contact Admin on Telegram</a>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentLicenseKey = null;
+    let currentUsername = null;
+    
+    function showTab(tab) {
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        event.target.classList.add('active');
+        
+        if(tab === 'login') {
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('registerSection').classList.add('hidden');
+            document.getElementById('statusSection').classList.add('hidden');
+        } else {
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('registerSection').classList.remove('hidden');
+            document.getElementById('statusSection').classList.add('hidden');
+        }
+    }
+    
+    async function registerUser() {
+        const username = document.getElementById('regUsername').value;
+        const password = document.getElementById('regPassword').value;
+        const telegram = document.getElementById('regTelegram').value;
+        const facebook = document.getElementById('regFacebook').value;
+        const reason = document.getElementById('regReason').value;
+        
+        if(!username || !password || !telegram) {
+            alert('Please fill in all required fields (*)');
+            return;
+        }
+        
+        const btn = event.target;
+        btn.disabled = true;
+        btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;"></div> Submitting...';
+        
+        try {
+            const res = await fetch('/api/user/register', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, password, telegram, facebook, reason})
+            });
+            const data = await res.json();
+            
+            const resultDiv = document.getElementById('registerResult');
+            if(data.success) {
+                resultDiv.className = 'alert-success';
+                resultDiv.innerHTML = '✅ Registration submitted! Admin will review and contact you on Telegram with your license.';
+                resultDiv.style.display = 'block';
+                document.getElementById('regUsername').value = '';
+                document.getElementById('regPassword').value = '';
+                document.getElementById('regTelegram').value = '';
+                document.getElementById('regFacebook').value = '';
+                document.getElementById('regReason').value = '';
+                setTimeout(() => { showTab('login'); }, 3000);
+            } else {
+                resultDiv.className = 'alert-error';
+                resultDiv.innerHTML = '❌ Error: ' + data.error;
+                resultDiv.style.display = 'block';
+            }
+        } catch(error) {
+            document.getElementById('registerResult').className = 'alert-error';
+            document.getElementById('registerResult').innerHTML = '❌ Connection error. Please try again.';
+            document.getElementById('registerResult').style.display = 'block';
+        }
+        
+        btn.disabled = false;
+        btn.innerHTML = 'SUBMIT REGISTRATION';
+    }
+    
+    async function checkLicense() {
+        const username = document.getElementById('loginUsername').value;
+        const password = document.getElementById('loginPassword').value;
+        
+        if(!username || !password) {
+            showError('Please enter username and password');
+            return;
+        }
+        
+        const btn = event.target;
+        btn.disabled = true;
+        btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;"></div> Checking...';
+        
+        try {
+            const res = await fetch('/api/user/check-license', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: username, password: password})
+            });
+            const data = await res.json();
+            
+            if(data.success) {
+                currentLicenseKey = data.license_key;
+                currentUsername = username;
+                displayLicenseStatus(data);
+                document.getElementById('loginSection').classList.add('hidden');
+                document.getElementById('registerSection').classList.add('hidden');
+                document.getElementById('statusSection').classList.remove('hidden');
+            } else {
+                showError(data.error || 'Invalid credentials or license not found');
+            }
+        } catch (error) {
+            showError('Connection error. Please try again.');
+        }
+        
+        btn.disabled = false;
+        btn.innerHTML = 'CHECK LICENSE STATUS';
+    }
+    
+    function displayLicenseStatus(data) {
+        const statusClass = data.is_expired ? 'status-expired' : (data.days_left < 3 ? 'status-warning' : 'status-active');
+        const badgeClass = data.is_expired ? 'badge-expired' : (data.days_left < 3 ? 'badge-warning' : 'badge-active');
+        const statusText = data.is_expired ? 'EXPIRED' : (data.days_left < 3 ? 'EXPIRING SOON' : 'ACTIVE');
+        
+        let hwidHtml = '';
+        if(data.hwids && data.hwids.length > 0) {
+            hwidHtml = '<div class="info-row"><span class="info-label">🖥️ Activated Devices:</span><span class="info-value">' + data.hwids.length + ' device(s)</span></div>';
+        }
+        
+        const html = `
+            <div class="status-box ${statusClass}">
+                <div class="info-row"><span class="info-label">🔑 License Key:</span><span class="info-value"><code>${data.license_key}</code></span></div>
+                <div class="info-row"><span class="info-label">👤 Username:</span><span class="info-value">${data.username}</span></div>
+                <div class="info-row"><span class="info-label">📋 License Type:</span><span class="info-value">${data.license_type}</span></div>
+                <div class="info-row"><span class="info-label">📅 Expires:</span><span class="info-value">${data.expires_at || 'NEVER'}</span></div>
+                <div class="info-row"><span class="info-label">⏰ Status:</span><span class="info-value"><span class="badge ${badgeClass}">${statusText}</span></span></div>
+                ${data.days_left !== null ? `<div class="info-row"><span class="info-label">📆 Days Left:</span><span class="info-value">${data.days_left} days</span></div>` : ''}
+                ${data.usage_count !== undefined ? `<div class="info-row"><span class="info-label">📊 Total API Calls:</span><span class="info-value">${data.usage_count}</span></div>` : ''}
+                ${hwidHtml}
+                ${data.created_at ? `<div class="info-row"><span class="info-label">📅 Created:</span><span class="info-value">${new Date(data.created_at).toLocaleString()}</span></div>` : ''}
+                ${data.last_used ? `<div class="info-row"><span class="info-label">🕐 Last Used:</span><span class="info-value">${new Date(data.last_used).toLocaleString()}</span></div>` : ''}
+            </div>
+            ${data.is_expired ? '<div class="alert-error" style="margin:10px 0;">⚠️ Your license has expired. Submit a request for reactivation.</div>' : ''}
+            ${!data.is_expired && data.days_left < 7 ? '<div class="alert-warning" style="background:rgba(245,158,11,0.2);border:1px solid #F59E0B;padding:10px;border-radius:8px;margin:10px 0;">⚠️ Your license is expiring soon! Submit a request to extend.</div>' : ''}
+        `;
+        
+        document.getElementById('statusContent').innerHTML = html;
+        document.getElementById('requestForm').classList.add('show');
+    }
+    
+    async function submitRequest() {
+        const requestType = document.getElementById('requestType').value;
+        const requestDays = document.getElementById('requestDays').value;
+        const requestMessage = document.getElementById('requestMessage').value;
+        
+        if(!requestMessage) {
+            alert('Please describe your request');
+            return;
+        }
+        
+        const res = await fetch('/api/user/submit-request', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                license_key: currentLicenseKey,
+                username: currentUsername,
+                request_type: requestType,
+                days_requested: parseInt(requestDays) || 0,
+                message: requestMessage,
+                contact: ''
+            })
+        });
+        
+        const data = await res.json();
+        const resultDiv = document.getElementById('requestResult');
+        
+        if(data.success) {
+            resultDiv.className = 'alert-success';
+            resultDiv.innerHTML = '✅ Request submitted successfully! Admin will review and contact you soon.';
+            resultDiv.style.display = 'block';
+            document.getElementById('requestMessage').value = '';
+            setTimeout(() => { resultDiv.style.display = 'none'; }, 5000);
+        } else {
+            resultDiv.className = 'alert-error';
+            resultDiv.innerHTML = '❌ Error: ' + data.error;
+            resultDiv.style.display = 'block';
+        }
+    }
+    
+    function showError(msg) {
+        const errorDiv = document.getElementById('loginError');
+        errorDiv.innerHTML = msg;
+        errorDiv.style.display = 'block';
+        setTimeout(() => { errorDiv.style.display = 'none'; }, 5000);
+    }
+</script>
+</body>
+</html>
+"""
+
+# ==================================================
+# 🎨 ADMIN PANEL HTML (With Delete Buttons & Registrations)
 # ==================================================
 ADMIN_HTML = """
 <!DOCTYPE html>
@@ -355,7 +654,6 @@ ADMIN_HTML = """
         .badge-pending { background: #F59E0B; }
         .badge-approved { background: #10B981; }
         .badge-rejected { background: #EF4444; }
-        .role-badge { background: #7C3AED; padding: 4px 12px; border-radius: 20px; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -379,7 +677,7 @@ ADMIN_HTML = """
             <div class="stat-card"><div class="stat-number" id="statTrials">0</div><div>My Trials</div></div>
             <div class="stat-card" id="statCustomCard"><div class="stat-number" id="statCustom">0</div><div>My Custom</div></div>
             <div class="stat-card" id="statPermanentCard" style="display: none;"><div class="stat-number" id="statPermanent">0</div><div>My Permanent</div></div>
-            <div class="stat-card"><div class="stat-number" id="statHistory">0</div><div>History</div></div>
+            <div class="stat-card"><div class="stat-number" id="statRegistrations">0</div><div>Registrations</div></div>
             <div class="stat-card"><div class="stat-number" id="statRequests">0</div><div>Requests</div></div>
         </div>
         
@@ -388,6 +686,7 @@ ADMIN_HTML = """
             <button class="tab" id="customTab" onclick="switchTab('customActivation')">✨ CUSTOM</button>
             <button class="tab" id="permanentTab" style="display: none;" onclick="switchTab('permanentLicense')">🔑 PERMANENT</button>
             <button class="tab" onclick="switchTab('myLicenses')">📋 MY LICENSES</button>
+            <button class="tab" onclick="switchTab('registrations')">📝 REGISTRATIONS</button>
             <button class="tab" onclick="switchTab('userRequests')">📨 REQUESTS</button>
             <button class="tab" onclick="switchTab('history')">📜 HISTORY</button>
             <button class="tab" id="adminTab" style="display: none;" onclick="switchTab('admins')">👨‍💼 MANAGE</button>
@@ -395,6 +694,7 @@ ADMIN_HTML = """
             <button class="tab" onclick="switchTab('monitor')">📈 MONITOR</button>
         </div>
         
+        <!-- Generate Trial -->
         <div id="generateTrial" class="content active">
             <h2>🎲 Generate Trial License</h2>
             <select id="trialDuration">
@@ -410,6 +710,7 @@ ADMIN_HTML = """
             <div id="trialResult" class="result-box" style="display: none;"></div>
         </div>
         
+        <!-- Custom Activation -->
         <div id="customActivation" class="content">
             <h2>✨ Custom Activation (Multi-PC)</h2>
             <input type="text" id="customUsername" placeholder="Username *">
@@ -428,6 +729,7 @@ ADMIN_HTML = """
             <div id="customResult" class="result-box" style="display: none;"></div>
         </div>
         
+        <!-- Permanent License -->
         <div id="permanentLicense" class="content">
             <h2>🔑 Permanent License (50 Credits)</h2>
             <input type="text" id="permLicenseKey" placeholder="License Key *">
@@ -437,6 +739,7 @@ ADMIN_HTML = """
             <div id="permResult" class="result-box" style="display: none;"></div>
         </div>
         
+        <!-- My Licenses -->
         <div id="myLicenses" class="content">
             <h2>📋 My Active Licenses</h2>
             <div style="margin-bottom: 10px;">
@@ -449,12 +752,22 @@ ADMIN_HTML = """
             <div id="myPermanentList" style="display: none;"></div>
         </div>
         
+        <!-- Registrations Tab -->
+        <div id="registrations" class="content">
+            <h2>📝 User Registration Requests</h2>
+            <p>Users register here. Approve to create a license for them.</p>
+            <button onclick="loadRegistrations()">REFRESH</button>
+            <div id="registrationsList"></div>
+        </div>
+        
+        <!-- User Requests Tab -->
         <div id="userRequests" class="content">
-            <h2>📨 User Requests</h2>
+            <h2>📨 User Extension/Reactivation Requests</h2>
             <button onclick="loadUserRequests()">REFRESH</button>
             <div id="requestsList"></div>
         </div>
         
+        <!-- History -->
         <div id="history" class="content">
             <h2>📜 License History</h2>
             <input type="text" id="historySearch" placeholder="Search..." onkeyup="filterHistory()" style="width: 100%;">
@@ -463,6 +776,7 @@ ADMIN_HTML = """
             <div id="historyList"></div>
         </div>
         
+        <!-- Admins Management -->
         <div id="admins" class="content">
             <div class="master-only"><h2>👑 MASTER CONTROL</h2></div>
             <h3>➕ Add User</h3>
@@ -499,6 +813,7 @@ ADMIN_HTML = """
             <div id="moderatorsList"></div>
         </div>
         
+        <!-- Change Password -->
         <div id="changePassword" class="content">
             <h2>🔐 Change Your Password</h2>
             <input type="password" id="oldPassword" placeholder="Current Password">
@@ -508,6 +823,7 @@ ADMIN_HTML = """
             <div id="passwordResult" class="result-box" style="display: none;"></div>
         </div>
         
+        <!-- Monitor -->
         <div id="monitor" class="content">
             <h2>📈 Monitor</h2>
             <button onclick="loadMonitor()">REFRESH</button>
@@ -564,7 +880,7 @@ ADMIN_HTML = """
             document.getElementById('roleInfo').innerHTML = roleInfo;
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainPanel').style.display = 'block';
-            loadStats(); loadMyLicenses(); loadHistory(); loadUserRequests();
+            loadStats(); loadMyLicenses(); loadHistory(); loadRegistrations(); loadUserRequests();
         } else {
             document.getElementById('loginError').style.display = 'block';
         }
@@ -576,6 +892,7 @@ ADMIN_HTML = """
         event.target.classList.add('active');
         document.getElementById(tabId).classList.add('active');
         if(tabId === 'myLicenses') loadMyLicenses();
+        if(tabId === 'registrations') loadRegistrations();
         if(tabId === 'userRequests') loadUserRequests();
         if(tabId === 'history') loadHistory();
         if(tabId === 'admins' && currentRole === 'master') loadAdmins();
@@ -601,7 +918,7 @@ ADMIN_HTML = """
             document.getElementById('statTrials').textContent = data.trials;
             document.getElementById('statCustom').textContent = data.custom || 0;
             document.getElementById('statPermanent').textContent = data.permanent || 0;
-            document.getElementById('statHistory').textContent = data.history_count || 0;
+            document.getElementById('statRegistrations').textContent = data.pending_registrations || 0;
             document.getElementById('statRequests').textContent = data.pending_requests || 0;
             document.getElementById('currentCredits').textContent = data.user_credits || 'Unlimited';
         }
@@ -707,12 +1024,17 @@ ADMIN_HTML = """
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>License</th><th>Duration</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
+        let html = '<tr><table><th>License</th><th>Duration</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.trials.forEach(t => {
-            html += `<tr><td>${t.license_key} <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${t.license_key}')">Copy</button></td>
-                    <td>${t.duration_hours}</td><td>${t.hwid_count || 0}</td><td>${t.expires_at || '-'}</td>
-                    <td>${t.status}</td><td>${t.usage_count || 0}</td>
-                    <td><button class="btn-danger" onclick="deleteTrial('${t.license_key}')">Delete</button></td></tr>`;
+            html += `<tr>
+                <td>${t.license_key} <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('${t.license_key}')">Copy</button></td>
+                <td>${t.duration_hours}</td>
+                <td>${t.hwid_count || 0}</td>
+                <td>${t.expires_at || '-'}</td>
+                <td>${t.status}</td>
+                <td>${t.usage_count || 0}</td>
+                <td><button class="btn-danger" onclick="deleteTrial('${t.license_key}')">Delete</button></td>
+            </tr>`;
         });
         html += '</table>';
         document.getElementById('myTrialsList').innerHTML = html;
@@ -726,13 +1048,16 @@ ADMIN_HTML = """
         const data = await res.json();
         let html = '能懈<table><tr><th>License</th><th>Username</th><th>Password</th><th>HWIDs</th><th>Expires</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.activations.forEach(a => {
-            html += `<tr><td>${a.license_key} <button class="copy-btn" onclick="copyToClipboard('${a.license_key}')">Copy</button></td>
-                    <td>${a.username} <button class="copy-btn" onclick="copyToClipboard('${a.username}')">Copy</button></td>
-                    <td>${a.password} <button class="copy-btn" onclick="copyToClipboard('${a.password}')">Copy</button></td>
-                    <td>${a.hwids ? a.hwids.length : 0}</td><td>${a.expires_at || 'NEVER'}</td>
-                    <td class="${a.status === 'ACTIVE' ? 'success' : 'warning'}">${a.status}</td>
-                    <td>${a.usage_count || 0}</td>
-                    <td><button class="btn-danger" onclick="deleteCustomActivation('${a.license_key}')">Delete</button></td></tr>`;
+            html += `<tr>
+                <td>${a.license_key} <button class="copy-btn" onclick="copyToClipboard('${a.license_key}')">Copy</button></td>
+                <td>${a.username} <button class="copy-btn" onclick="copyToClipboard('${a.username}')">Copy</button></td>
+                <td>${a.password} <button class="copy-btn" onclick="copyToClipboard('${a.password}')">Copy</button></td>
+                <td>${a.hwids ? a.hwids.length : 0}</td>
+                <td>${a.expires_at || 'NEVER'}</td>
+                <td class="${a.status === 'ACTIVE' ? 'success' : 'warning'}">${a.status}</td>
+                <td>${a.usage_count || 0}</td>
+                <td><button class="btn-danger" onclick="deleteCustomActivation('${a.license_key}')">Delete</button></td>
+            </tr>`;
         });
         html += '</table>';
         document.getElementById('myCustomList').innerHTML = html;
@@ -746,13 +1071,122 @@ ADMIN_HTML = """
         const data = await res.json();
         let html = '能懈<table><tr><th>License</th><th>Username</th><th>HWIDs</th><th>Status</th><th>Usage</th><th>Action</th></tr>';
         data.licenses.forEach(l => {
-            html += `<tr><td>${l.license_key} <button class="copy-btn" onclick="copyToClipboard('${l.license_key}')">Copy</button></td>
-                    <td>${l.username || '-'}</td><td>${l.hwids ? l.hwids.length : 0}</td>
-                    <td>${l.status}</td><td>${l.usage_count || 0}</td>
-                    <td><button class="btn-danger" onclick="deletePermanentLicense('${l.license_key}')">Delete</button></td></tr>`;
+            html += `<tr>
+                <td>${l.license_key} <button class="copy-btn" onclick="copyToClipboard('${l.license_key}')">Copy</button></td>
+                <td>${l.username || '-'}</td>
+                <td>${l.hwids ? l.hwids.length : 0}</td>
+                <td>${l.status}</td>
+                <td>${l.usage_count || 0}</td>
+                <td><button class="btn-danger" onclick="deletePermanentLicense('${l.license_key}')">Delete</button></td>
+            </tr>`;
         });
         html += '</table>';
         document.getElementById('myPermanentList').innerHTML = html;
+    }
+    
+    async function loadRegistrations() {
+        const res = await fetch(API_URL + '/api/admin/get-registrations', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
+        });
+        const data = await res.json();
+        let html = '能懈<table><tr><th>Date</th><th>Username</th><th>Telegram</th><th>Facebook</th><th>Reason</th><th>Status</th><th>Action</th></tr>';
+        data.registrations.forEach((reg, idx) => {
+            html += `<tr>
+                <td>${new Date(reg.created_at).toLocaleString()}</td>
+                <td><strong>${reg.username}</strong></td>
+                <td>${reg.telegram || '-'}</td>
+                <td>${reg.facebook || '-'}</td>
+                <td>${reg.reason ? reg.reason.substring(0, 50) : '-'}</td>
+                <td><span class="badge badge-${reg.status}">${reg.status}</span></td>
+                <td>
+                    ${reg.status === 'pending' ? `
+                        <button class="btn-success" onclick="approveRegistration(${idx}, '${reg.username}', '${reg.telegram}')">Approve & Create License</button>
+                        <button class="btn-danger" onclick="rejectRegistration(${idx})">Reject</button>
+                    ` : '-'}
+                </td>
+            </tr>`;
+        });
+        html += '</table>';
+        document.getElementById('registrationsList').innerHTML = html;
+    }
+    
+    async function approveRegistration(idx, username, telegram) {
+        if(!confirm(`Approve registration for ${username}? You will need to create a license for them.`)) return;
+        
+        const licenseType = prompt('Select license type:\n1 - Trial\n2 - Custom\n3 - Permanent', '1');
+        if(!licenseType) return;
+        
+        if(licenseType === '1') {
+            const duration = prompt('Duration in hours (e.g., 24, 168, 720):', '168');
+            if(!duration) return;
+            
+            const res = await fetch(API_URL + '/api/admin/approve-registration-trial', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    admin_username: currentUser,
+                    admin_password: document.getElementById('loginPassword').value,
+                    registration_index: idx,
+                    duration_hours: parseInt(duration)
+                })
+            });
+            const data = await res.json();
+            if(data.success) {
+                alert(`License created!\n\nLicense Key: ${data.license_key}\nUsername: ${data.username}\nPassword: ${data.password}\n\nContact user on Telegram: ${telegram}`);
+                loadRegistrations(); loadStats();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } else if(licenseType === '2') {
+            const durationType = prompt('Duration type (hours/days/weeks/months/years/unlimited):', 'days');
+            const durationValue = prompt('Duration value:', '7');
+            if(!durationType || !durationValue) return;
+            
+            const res = await fetch(API_URL + '/api/admin/approve-registration-custom', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    admin_username: currentUser,
+                    admin_password: document.getElementById('loginPassword').value,
+                    registration_index: idx,
+                    duration_type: durationType,
+                    duration_value: parseFloat(durationValue)
+                })
+            });
+            const data = await res.json();
+            if(data.success) {
+                alert(`License created!\n\nLicense Key: ${data.license_key}\nUsername: ${data.username}\nPassword: ${data.password}\n\nContact user on Telegram: ${telegram}`);
+                loadRegistrations(); loadStats();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } else if(licenseType === '3') {
+            const res = await fetch(API_URL + '/api/admin/approve-registration-permanent', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    admin_username: currentUser,
+                    admin_password: document.getElementById('loginPassword').value,
+                    registration_index: idx
+                })
+            });
+            const data = await res.json();
+            if(data.success) {
+                alert(`Permanent License created!\n\nLicense Key: ${data.license_key}\nUsername: ${data.username}\nPassword: ${data.password}\n\nContact user on Telegram: ${telegram}`);
+                loadRegistrations(); loadStats();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        }
+    }
+    
+    async function rejectRegistration(idx) {
+        if(!confirm('Reject this registration?')) return;
+        const res = await fetch(API_URL + '/api/admin/reject-registration', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, registration_index: idx})
+        });
+        const data = await res.json();
+        if(data.success) { alert('Registration rejected!'); loadRegistrations(); loadStats(); }
+        else { alert('Error: ' + data.error); }
     }
     
     async function loadUserRequests() {
@@ -761,34 +1195,39 @@ ADMIN_HTML = """
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>Date</th><th>License</th><th>User</th><th>Type</th><th>Message</th><th>Contact</th><th>Status</th><th>Action</th></tr>';
+        let html = '能懈<table><tr><th>Date</th><th>License</th><th>User</th><th>Type</th><th>Message</th><th>Status</th><th>Action</th></tr>';
         data.requests.forEach((req, idx) => {
-            html += `<tr><td>${new Date(req.created_at).toLocaleString()}</td><td>${req.license_key}</td><td>${req.username}</td>
-                    <td>${req.request_type}</td><td>${req.message.substring(0, 50)}...</td><td>${req.contact || '-'}</td>
-                    <td><span class="badge badge-${req.status}">${req.status}</span></td>
-                    <td>${req.status === 'pending' ? `<button class="btn-success" onclick="approveRequest(${idx}, '${req.license_key}', '${req.request_type}', ${req.days_requested || 7})">Approve</button>
-                    <button class="btn-danger" onclick="rejectRequest(${idx})">Reject</button>` : '-'}</td></tr>`;
+            html += `<tr>
+                <td>${new Date(req.created_at).toLocaleString()}</td>
+                <td>${req.license_key}</td>
+                <td>${req.username}</td>
+                <td>${req.request_type}</td>
+                <td>${req.message.substring(0, 50)}...</td>
+                <td><span class="badge badge-${req.status}">${req.status}</span></td>
+                <td>${req.status === 'pending' ? `<button class="btn-success" onclick="approveRequest(${idx}, '${req.license_key}', '${req.request_type}', ${req.days_requested || 7})">Approve</button>
+                    <button class="btn-danger" onclick="rejectRequest(${idx})">Reject</button>` : '-'}</td>
+            </tr>`;
         });
         html += '</table>';
         document.getElementById('requestsList').innerHTML = html;
     }
     
-    async function approveRequest(idx, licenseKey, reqType, days) {
+    async function approveRequest(reqIdx, licenseKey, reqType, days) {
         if(!confirm(`Approve request for ${licenseKey}?`)) return;
         const res = await fetch(API_URL + '/api/admin/approve-request', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, request_index: idx, license_key: licenseKey, request_type: reqType, days_to_add: days})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, request_index: reqIdx, license_key: licenseKey, request_type: reqType, days_to_add: days})
         });
         const data = await res.json();
         if(data.success) { alert('Approved!'); loadUserRequests(); loadStats(); }
         else { alert('Error: ' + data.error); }
     }
     
-    async function rejectRequest(idx) {
+    async function rejectRequest(reqIdx) {
         if(!confirm('Reject this request?')) return;
         const res = await fetch(API_URL + '/api/admin/reject-request', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, request_index: idx})
+            body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value, request_index: reqIdx})
         });
         const data = await res.json();
         if(data.success) { alert('Rejected!'); loadUserRequests(); }
@@ -801,13 +1240,18 @@ ADMIN_HTML = """
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let html = '<table><tr><th>Created</th><th>License</th><th>Username</th><th>Password</th><th>Type</th><th>Owner</th><th>Expires</th><th>Action</th></tr>';
+        let html = '能懈<table><tr><th>Created</th><th>License</th><th>Username</th><th>Password</th><th>Type</th><th>Owner</th><th>Expires</th><th>Action</th></tr>';
         data.history.forEach(h => {
-            html += `<tr><td>${new Date(h.created_at).toLocaleString()}</td><td><strong>${h.license_key}</strong> <button class="copy-btn" onclick="copyToClipboard('${h.license_key}')">Copy</button></td>
-                    <td>${h.username} <button class="copy-btn" onclick="copyToClipboard('${h.username}')">Copy</button></td>
-                    <td>${h.password} <button class="copy-btn" onclick="copyToClipboard('${h.password}')">Copy</button></td>
-                    <td>${h.type}</td><td>${h.owner}</td><td>${h.expires_at || 'NEVER'}</td>
-                    <td><button onclick="showCredentials('${h.license_key}', '${h.username}', '${h.password}', '${h.type}', '${h.expires_at}')">View</button></td></tr>`;
+            html += `<tr>
+                <td>${new Date(h.created_at).toLocaleString()}</td>
+                <td><strong>${h.license_key}</strong> <button class="copy-btn" onclick="copyToClipboard('${h.license_key}')">Copy</button></td>
+                <td>${h.username} <button class="copy-btn" onclick="copyToClipboard('${h.username}')">Copy</button></td>
+                <td>${h.password} <button class="copy-btn" onclick="copyToClipboard('${h.password}')">Copy</button></td>
+                <td>${h.type}</td>
+                <td>${h.owner}</td>
+                <td>${h.expires_at || 'NEVER'}</td>
+                <td><button onclick="showCredentials('${h.license_key}', '${h.username}', '${h.password}', '${h.type}', '${h.expires_at}')">View</button></td>
+            </tr>`;
         });
         html += '</table>';
         document.getElementById('historyList').innerHTML = html;
@@ -829,7 +1273,7 @@ ADMIN_HTML = """
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        let adminsHtml = '<table><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
+        let adminsHtml = '能懈<table><tr><th>Username</th><th>Credits</th><th>Created</th><th>Action</th></tr>';
         data.admins.forEach(a => { adminsHtml += `<tr><td>${a.username}</td><td>${a.credits}</td><td>${a.created_at || '-'}</td><td><button class="btn-danger" onclick="deleteAdmin('${a.username}')">Delete</button></td></tr>`; });
         adminsHtml += '</table>';
         document.getElementById('adminsList').innerHTML = adminsHtml;
@@ -912,225 +1356,17 @@ ADMIN_HTML = """
             body: JSON.stringify({admin_username: currentUser, admin_password: document.getElementById('loginPassword').value})
         });
         const data = await res.json();
-        document.getElementById('monitorData').innerHTML = `📊 STATUS<br><br>🔹 Trials: ${data.my_trials}<br>🔹 Custom: ${data.my_custom}<br>🔹 Permanent: ${data.my_permanent}<br>🔹 History: ${data.history_count}<br>🔹 Pending: ${data.pending_requests}<br>🔹 Active Users: ${data.active_users}<br><br>⏰ ${data.server_time}`;
+        document.getElementById('monitorData').innerHTML = `📊 STATUS<br><br>🔹 Trials: ${data.my_trials}<br>🔹 Custom: ${data.my_custom}<br>🔹 Permanent: ${data.my_permanent}<br>🔹 Registrations: ${data.registrations}<br>🔹 Requests: ${data.pending_requests}<br>🔹 History: ${data.history_count}<br>🔹 Active Users: ${data.active_users}<br><br>⏰ ${data.server_time}`;
     }
     
-    async function deleteTrial(key) { if(confirm('Delete?')) { await fetch(API_URL + '/api/admin/delete-trial', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyTrials(); loadStats(); } }
-    async function deleteCustomActivation(key) { if(confirm('Delete?')) { await fetch(API_URL + '/api/admin/delete-custom-activation', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyCustom(); loadStats(); } }
-    async function deletePermanentLicense(key) { if(confirm('Delete?')) { await fetch(API_URL + '/api/admin/delete-permanent-license', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyPermanent(); loadStats(); } }
+    async function deleteTrial(key) { if(confirm('Delete this trial?')) { await fetch(API_URL + '/api/admin/delete-trial', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyTrials(); loadStats(); } }
+    async function deleteCustomActivation(key) { if(confirm('Delete this activation?')) { await fetch(API_URL + '/api/admin/delete-custom-activation', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyCustom(); loadStats(); } }
+    async function deletePermanentLicense(key) { if(confirm('Delete this license?')) { await fetch(API_URL + '/api/admin/delete-permanent-license', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,license_key:key})}); loadMyPermanent(); loadStats(); } }
     async function deleteAdmin(username) { if(confirm(`Delete ${username}?`)) { await fetch(API_URL + '/api/admin/delete-admin', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,target_username:username,role:'admin'})}); loadAdmins(); } }
     async function deleteModerator(username) { if(confirm(`Delete ${username}?`)) { await fetch(API_URL + '/api/admin/delete-admin', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_username:currentUser,admin_password:document.getElementById('loginPassword').value,target_username:username,role:'moderator'})}); loadAdmins(); } }
     
     function closeModal() { document.getElementById('credsModal').style.display = 'none'; }
     setInterval(() => { if(document.getElementById('mainPanel').style.display === 'block') loadStats(); }, 30000);
-</script>
-</body>
-</html>
-"""
-
-# ==================================================
-# 🎨 USER PORTAL HTML (Fixed - Working)
-# ==================================================
-USER_PORTAL_HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>JEPFX License Portal</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
-        body { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); min-height: 100vh; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 30px; }
-        .header h1 { color: #7C3AED; font-size: 32px; }
-        .header p { color: #aaa; }
-        .card { background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border-radius: 15px; padding: 25px; margin-bottom: 20px; }
-        .card h2 { color: #7C3AED; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 10px; }
-        input, select, textarea { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(0,0,0,0.3); color: white; }
-        button { background: #7C3AED; color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
-        button:hover { background: #6D28D9; transform: translateY(-2px); }
-        .status-box { background: rgba(0,0,0,0.5); border-radius: 10px; padding: 15px; margin: 15px 0; border-left: 3px solid #7C3AED; }
-        .status-active { border-left-color: #10B981; }
-        .status-expired { border-left-color: #EF4444; }
-        .status-warning { border-left-color: #F59E0B; }
-        .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        .info-label { color: #aaa; }
-        .info-value { color: white; font-weight: bold; }
-        .contact-buttons { display: flex; gap: 10px; margin-top: 20px; }
-        .contact-btn { flex: 1; text-align: center; text-decoration: none; padding: 12px; border-radius: 8px; color: white; font-weight: bold; }
-        .telegram-btn { background: #0088cc; }
-        .telegram-btn:hover { background: #006699; }
-        .request-form { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2); }
-        .request-form.show { display: block; }
-        .alert-success { background: rgba(16,185,129,0.2); border: 1px solid #10B981; color: #10B981; padding: 12px; border-radius: 8px; margin: 10px 0; }
-        .alert-error { background: rgba(239,68,68,0.2); border: 1px solid #EF4444; color: #EF4444; padding: 12px; border-radius: 8px; margin: 10px 0; }
-        .alert-info { background: rgba(59,130,246,0.2); border: 1px solid #3B82F6; color: #3B82F6; padding: 12px; border-radius: 8px; margin: 10px 0; }
-        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
-        .badge-active { background: #10B981; color: white; }
-        .badge-expired { background: #EF4444; color: white; }
-        .badge-warning { background: #F59E0B; color: white; }
-        .hidden { display: none; }
-        .loading { text-align: center; padding: 20px; }
-        .spinner { border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid #7C3AED; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
-</head>
-<body>
-<div class="container">
-    <div class="header">
-        <h1>🔑 JEPFX License Portal</h1>
-        <p>Check your license status, request extensions, and get support</p>
-    </div>
-    
-    <div id="loginSection" class="card">
-        <h2>🔐 License Login</h2>
-        <p>Enter your username and password to check your license status</p>
-        <input type="text" id="loginUsername" placeholder="Username">
-        <input type="password" id="loginPassword" placeholder="Password">
-        <button onclick="checkLicense()">CHECK LICENSE STATUS</button>
-        <div id="loginError" class="alert-error" style="display: none;"></div>
-    </div>
-    
-    <div id="statusSection" class="card hidden">
-        <div id="statusContent"></div>
-        <div id="requestForm" class="request-form">
-            <h3>📨 Request Extension / Reactivation</h3>
-            <select id="requestType">
-                <option value="extension">Extension (Add more days)</option>
-                <option value="reactivation">Reactivation (Reset HWID)</option>
-                <option value="other">Other Request</option>
-            </select>
-            <input type="number" id="requestDays" placeholder="Days to add (if extension)" value="7">
-            <textarea id="requestMessage" rows="3" placeholder="Describe your request..."></textarea>
-            <input type="text" id="contactInfo" placeholder="Your contact (Telegram/Discord/Email)" value="t.me/">
-            <button onclick="submitRequest()">SUBMIT REQUEST</button>
-            <div id="requestResult" class="alert-info" style="display: none;"></div>
-        </div>
-        <div class="contact-buttons">
-            <a href="https://t.me/JEPFX_0" target="_blank" class="contact-btn telegram-btn">📱 Contact on Telegram</a>
-        </div>
-    </div>
-</div>
-
-<script>
-    let currentLicenseKey = null;
-    let currentUsername = null;
-    
-    async function checkLicense() {
-        const username = document.getElementById('loginUsername').value;
-        const password = document.getElementById('loginPassword').value;
-        
-        if(!username || !password) {
-            showError('Please enter username and password');
-            return;
-        }
-        
-        const btn = event.target;
-        btn.disabled = true;
-        btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;"></div> Checking...';
-        
-        try {
-            const res = await fetch('/api/user/check-license', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username: username, password: password})
-            });
-            const data = await res.json();
-            
-            if(data.success) {
-                currentLicenseKey = data.license_key;
-                currentUsername = username;
-                displayLicenseStatus(data);
-                document.getElementById('loginSection').classList.add('hidden');
-                document.getElementById('statusSection').classList.remove('hidden');
-            } else {
-                showError(data.error || 'Invalid credentials or license not found');
-            }
-        } catch (error) {
-            showError('Connection error. Please try again.');
-        }
-        
-        btn.disabled = false;
-        btn.innerHTML = 'CHECK LICENSE STATUS';
-    }
-    
-    function displayLicenseStatus(data) {
-        const statusClass = data.is_expired ? 'status-expired' : (data.days_left < 3 ? 'status-warning' : 'status-active');
-        const badgeClass = data.is_expired ? 'badge-expired' : (data.days_left < 3 ? 'badge-warning' : 'badge-active');
-        const statusText = data.is_expired ? 'EXPIRED' : (data.days_left < 3 ? 'EXPIRING SOON' : 'ACTIVE');
-        
-        let hwidHtml = '';
-        if(data.hwids && data.hwids.length > 0) {
-            hwidHtml = '<div class="info-row"><span class="info-label">🖥️ Activated Devices:</span><span class="info-value">' + data.hwids.length + ' device(s)</span></div>';
-        }
-        
-        const html = `
-            <div class="status-box ${statusClass}">
-                <div class="info-row"><span class="info-label">🔑 License Key:</span><span class="info-value"><code>${data.license_key}</code></span></div>
-                <div class="info-row"><span class="info-label">👤 Username:</span><span class="info-value">${data.username}</span></div>
-                <div class="info-row"><span class="info-label">📋 License Type:</span><span class="info-value">${data.license_type}</span></div>
-                <div class="info-row"><span class="info-label">📅 Expires:</span><span class="info-value">${data.expires_at || 'NEVER'}</span></div>
-                <div class="info-row"><span class="info-label">⏰ Status:</span><span class="info-value"><span class="badge ${badgeClass}">${statusText}</span></span></div>
-                ${data.days_left !== null ? `<div class="info-row"><span class="info-label">📆 Days Left:</span><span class="info-value">${data.days_left} days</span></div>` : ''}
-                ${data.usage_count !== undefined ? `<div class="info-row"><span class="info-label">📊 Total API Calls:</span><span class="info-value">${data.usage_count}</span></div>` : ''}
-                ${hwidHtml}
-                ${data.created_at ? `<div class="info-row"><span class="info-label">📅 Created:</span><span class="info-value">${new Date(data.created_at).toLocaleString()}</span></div>` : ''}
-                ${data.last_used ? `<div class="info-row"><span class="info-label">🕐 Last Used:</span><span class="info-value">${new Date(data.last_used).toLocaleString()}</span></div>` : ''}
-            </div>
-            ${data.is_expired ? '<div class="alert-error" style="margin:10px 0;">⚠️ Your license has expired. Submit a request for reactivation.</div>' : ''}
-            ${!data.is_expired && data.days_left < 7 ? '<div class="alert-warning" style="background:rgba(245,158,11,0.2);border:1px solid #F59E0B;padding:10px;border-radius:8px;margin:10px 0;">⚠️ Your license is expiring soon! Submit a request to extend.</div>' : ''}
-        `;
-        
-        document.getElementById('statusContent').innerHTML = html;
-        document.getElementById('requestForm').classList.add('show');
-    }
-    
-    async function submitRequest() {
-        const requestType = document.getElementById('requestType').value;
-        const requestDays = document.getElementById('requestDays').value;
-        const requestMessage = document.getElementById('requestMessage').value;
-        const contactInfo = document.getElementById('contactInfo').value;
-        
-        if(!requestMessage) {
-            alert('Please describe your request');
-            return;
-        }
-        
-        const res = await fetch('/api/user/submit-request', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                license_key: currentLicenseKey,
-                username: currentUsername,
-                request_type: requestType,
-                days_requested: parseInt(requestDays) || 0,
-                message: requestMessage,
-                contact: contactInfo
-            })
-        });
-        
-        const data = await res.json();
-        const resultDiv = document.getElementById('requestResult');
-        
-        if(data.success) {
-            resultDiv.className = 'alert-success';
-            resultDiv.innerHTML = '✅ Request submitted successfully! Admin will review and contact you soon.';
-            resultDiv.style.display = 'block';
-            document.getElementById('requestMessage').value = '';
-            setTimeout(() => { resultDiv.style.display = 'none'; }, 5000);
-        } else {
-            resultDiv.className = 'alert-error';
-            resultDiv.innerHTML = '❌ Error: ' + data.error;
-            resultDiv.style.display = 'block';
-        }
-    }
-    
-    function showError(msg) {
-        const errorDiv = document.getElementById('loginError');
-        errorDiv.innerHTML = msg;
-        errorDiv.style.display = 'block';
-        setTimeout(() => { errorDiv.style.display = 'none'; }, 5000);
-    }
 </script>
 </body>
 </html>
@@ -1223,7 +1459,6 @@ def change_user_role():
     if target_username == MASTER_ADMIN["username"]:
         return jsonify({"success": False, "error": "Cannot change master admin role"}), 400
     
-    # Remove from current role
     if target_username in ADMINS:
         user_data = ADMINS.pop(target_username)
     elif target_username in MODERATORS:
@@ -1231,7 +1466,6 @@ def change_user_role():
     else:
         return jsonify({"success": False, "error": "User not found"}), 404
     
-    # Add to new role
     if new_role == "admin":
         ADMINS[target_username] = user_data
     else:
@@ -1249,7 +1483,8 @@ def get_stats():
     
     licenses = get_licenses_by_owner(auth["username"], auth["role"])
     history = get_history_by_owner(auth["username"], auth["role"])
-    pending_requests = sum(1 for r in USER_REQUESTS if r.get("status") == "pending" and (auth["role"] == "master" or r.get("license_key") in licenses["trials"] or r.get("license_key") in licenses["custom"]))
+    pending_requests = sum(1 for r in USER_REQUESTS if r.get("status") == "pending")
+    pending_registrations = sum(1 for r in USER_REGISTRATIONS if r.get("status") == "pending")
     
     return jsonify({
         "success": True,
@@ -1258,6 +1493,7 @@ def get_stats():
         "permanent": len(licenses["permanent"]),
         "history_count": len(history),
         "pending_requests": pending_requests,
+        "pending_registrations": pending_registrations,
         "user_credits": auth.get("credits", "Unlimited")
     }), 200
 
@@ -1290,6 +1526,7 @@ def generate_trial():
         "activated_at": None
     }
     TRIAL_USERS[user] = {"password": pwd, "linked_license": lic}
+    VALID_USERS[user] = pwd
     
     add_to_history(lic, user, pwd, "Trial", auth["username"], expires_at.isoformat(), {"duration_hours": dur})
     
@@ -1652,6 +1889,7 @@ def get_monitor_data():
     licenses = get_licenses_by_owner(auth["username"], auth["role"])
     history = get_history_by_owner(auth["username"], auth["role"])
     pending_requests = sum(1 for r in USER_REQUESTS if r.get("status") == "pending")
+    pending_registrations = sum(1 for r in USER_REGISTRATIONS if r.get("status") == "pending")
     
     active_users = set()
     for logs in USAGE_LOGS.values():
@@ -1664,6 +1902,7 @@ def get_monitor_data():
         "my_custom": len(licenses["custom"]),
         "my_permanent": len(licenses["permanent"]),
         "history_count": len(history),
+        "registrations": pending_registrations,
         "pending_requests": pending_requests,
         "active_users": len(active_users),
         "server_time": datetime.utcnow().isoformat()
@@ -1684,6 +1923,8 @@ def delete_trial():
         
         for user, user_data in list(TRIAL_USERS.items()):
             if user_data.get("linked_license") == key:
+                if user in VALID_USERS:
+                    del VALID_USERS[user]
                 del TRIAL_USERS[user]
         del TRIAL_LICENSES[key]
         save_data()
@@ -1703,6 +1944,9 @@ def delete_custom_activation():
         if auth["role"] != "master" and CUSTOM_ACTIVATIONS[key].get("owner") != auth["username"]:
             return jsonify({"success": False, "error": "Not your license"}), 403
         
+        username = CUSTOM_ACTIVATIONS[key].get("username")
+        if username in VALID_USERS:
+            del VALID_USERS[username]
         del CUSTOM_ACTIVATIONS[key]
         save_data()
         return jsonify({"success": True}), 200
@@ -1721,10 +1965,200 @@ def delete_permanent_license():
         if auth["role"] != "master" and PERMANENT_LICENSES[key].get("owner") != auth["username"]:
             return jsonify({"success": False, "error": "Not your license"}), 403
         
+        username = PERMANENT_LICENSES[key].get("username")
+        if username and username in VALID_USERS:
+            del VALID_USERS[username]
         del PERMANENT_LICENSES[key]
         save_data()
         return jsonify({"success": True}), 200
     return jsonify({"success": False, "error": "Not found"}), 404
+
+@app.route('/api/admin/get-registrations', methods=['POST'])
+def admin_get_registrations():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"]:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    if auth["role"] == "master":
+        registrations = USER_REGISTRATIONS
+    else:
+        registrations = []
+    
+    registrations.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return jsonify({"registrations": registrations}), 200
+
+@app.route('/api/admin/approve-registration-trial', methods=['POST'])
+def admin_approve_registration_trial():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"] or auth["role"] != "master":
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    reg_index = data.get("registration_index")
+    duration_hours = data.get("duration_hours", 168)
+    
+    if reg_index is None or reg_index >= len(USER_REGISTRATIONS):
+        return jsonify({"success": False, "error": "Registration not found"}), 404
+    
+    reg = USER_REGISTRATIONS[reg_index]
+    
+    # Create trial license
+    lic = f"JEPFX-TRIAL-{uuid.uuid4().hex[:8].upper()}"
+    user = reg["username"]
+    pwd = reg["password"]
+    expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
+    
+    TRIAL_LICENSES[lic] = {
+        "type": "trial",
+        "owner": auth["username"],
+        "hwids": [],
+        "duration_hours": duration_hours,
+        "start_time": None,
+        "expires_at": expires_at.isoformat(),
+        "activated_at": None
+    }
+    TRIAL_USERS[user] = {"password": pwd, "linked_license": lic}
+    VALID_USERS[user] = pwd
+    
+    add_to_history(lic, user, pwd, "Trial", auth["username"], expires_at.isoformat(), {"duration_hours": duration_hours})
+    
+    USER_REGISTRATIONS[reg_index]["status"] = "approved"
+    USER_REGISTRATIONS[reg_index]["license_key"] = lic
+    USER_REGISTRATIONS[reg_index]["approved_at"] = datetime.utcnow().isoformat()
+    
+    save_data()
+    
+    return jsonify({
+        "success": True,
+        "license_key": lic,
+        "username": user,
+        "password": pwd
+    }), 200
+
+@app.route('/api/admin/approve-registration-custom', methods=['POST'])
+def admin_approve_registration_custom():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"] or auth["role"] != "master":
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    reg_index = data.get("registration_index")
+    duration_type = data.get("duration_type", "days")
+    duration_value = float(data.get("duration_value", 30))
+    
+    if reg_index is None or reg_index >= len(USER_REGISTRATIONS):
+        return jsonify({"success": False, "error": "Registration not found"}), 404
+    
+    reg = USER_REGISTRATIONS[reg_index]
+    
+    now = datetime.utcnow()
+    expires_at = None
+    
+    if duration_type == "hours":
+        expires_at = now + timedelta(hours=duration_value)
+    elif duration_type == "days":
+        expires_at = now + timedelta(days=duration_value)
+    elif duration_type == "weeks":
+        expires_at = now + timedelta(weeks=duration_value)
+    elif duration_type == "months":
+        expires_at = now + timedelta(days=duration_value * 30)
+    elif duration_type == "years":
+        expires_at = now + timedelta(days=duration_value * 365)
+    # unlimited = None
+    
+    license_key = f"JEPFX-CUSTOM-{uuid.uuid4().hex[:8].upper()}"
+    
+    CUSTOM_ACTIVATIONS[license_key] = {
+        "username": reg["username"],
+        "password": reg["password"],
+        "license_key": license_key,
+        "owner": auth["username"],
+        "hwids": [],
+        "expires_at": expires_at.isoformat() if expires_at else None,
+        "created_at": now.isoformat(),
+        "activated": False
+    }
+    
+    VALID_USERS[reg["username"]] = reg["password"]
+    
+    add_to_history(license_key, reg["username"], reg["password"], "Custom", auth["username"], 
+                   expires_at.isoformat() if expires_at else "UNLIMITED", 
+                   {"duration_type": duration_type, "duration_value": duration_value})
+    
+    USER_REGISTRATIONS[reg_index]["status"] = "approved"
+    USER_REGISTRATIONS[reg_index]["license_key"] = license_key
+    USER_REGISTRATIONS[reg_index]["approved_at"] = now.isoformat()
+    
+    save_data()
+    
+    return jsonify({
+        "success": True,
+        "license_key": license_key,
+        "username": reg["username"],
+        "password": reg["password"]
+    }), 200
+
+@app.route('/api/admin/approve-registration-permanent', methods=['POST'])
+def admin_approve_registration_permanent():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"] or auth["role"] != "master":
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    reg_index = data.get("registration_index")
+    
+    if reg_index is None or reg_index >= len(USER_REGISTRATIONS):
+        return jsonify({"success": False, "error": "Registration not found"}), 404
+    
+    reg = USER_REGISTRATIONS[reg_index]
+    
+    license_key = f"JEPFX-PERM-{uuid.uuid4().hex[:8].upper()}"
+    
+    PERMANENT_LICENSES[license_key] = {
+        "type": "permanent",
+        "owner": auth["username"],
+        "username": reg["username"],
+        "password": reg["password"],
+        "hwids": [],
+        "expires_at": None,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    
+    VALID_USERS[reg["username"]] = reg["password"]
+    
+    add_to_history(license_key, reg["username"], reg["password"], "Permanent", auth["username"], "NEVER", {})
+    
+    USER_REGISTRATIONS[reg_index]["status"] = "approved"
+    USER_REGISTRATIONS[reg_index]["license_key"] = license_key
+    USER_REGISTRATIONS[reg_index]["approved_at"] = datetime.utcnow().isoformat()
+    
+    save_data()
+    
+    return jsonify({
+        "success": True,
+        "license_key": license_key,
+        "username": reg["username"],
+        "password": reg["password"]
+    }), 200
+
+@app.route('/api/admin/reject-registration', methods=['POST'])
+def admin_reject_registration():
+    data = request.get_json()
+    auth = check_admin_auth(data)
+    if not auth["authorized"] or auth["role"] != "master":
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    
+    reg_index = data.get("registration_index")
+    
+    if reg_index is None or reg_index >= len(USER_REGISTRATIONS):
+        return jsonify({"success": False, "error": "Registration not found"}), 404
+    
+    USER_REGISTRATIONS[reg_index]["status"] = "rejected"
+    USER_REGISTRATIONS[reg_index]["rejected_at"] = datetime.utcnow().isoformat()
+    
+    save_data()
+    return jsonify({"success": True}), 200
 
 @app.route('/api/admin/get-requests', methods=['POST'])
 def admin_get_requests():
@@ -1828,6 +2262,35 @@ def admin_reject_request():
 @app.route('/user')
 def user_portal():
     return render_template_string(USER_PORTAL_HTML)
+
+@app.route('/api/user/register', methods=['POST'])
+def user_register():
+    data = request.get_json()
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    telegram = data.get("telegram", "").strip()
+    facebook = data.get("facebook", "").strip()
+    reason = data.get("reason", "").strip()
+    
+    if not username or not password or not telegram:
+        return jsonify({"success": False, "error": "Username, password, and Telegram contact are required"}), 400
+    
+    # Check if username already exists
+    if username in VALID_USERS or username in TRIAL_USERS or username in [r.get("username") for r in USER_REGISTRATIONS if r.get("status") == "pending"]:
+        return jsonify({"success": False, "error": "Username already taken or pending approval"}), 400
+    
+    USER_REGISTRATIONS.append({
+        "username": username,
+        "password": password,
+        "telegram": telegram,
+        "facebook": facebook,
+        "reason": reason,
+        "status": "pending",
+        "created_at": datetime.utcnow().isoformat()
+    })
+    save_data()
+    
+    return jsonify({"success": True, "message": "Registration submitted. Admin will review and contact you."}), 200
 
 @app.route('/api/user/check-license', methods=['POST'])
 def user_check_license():
@@ -2072,4 +2535,3 @@ def home():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-    application = app
