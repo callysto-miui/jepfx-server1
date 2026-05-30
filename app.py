@@ -420,8 +420,8 @@ ADMIN_HTML = """
                 <option value="days">Days (1 credit/day)</option>
                 <option value="weeks">Weeks (5 credits/week)</option>
                 <option value="months">Months (10 credits/month)</option>
-                <option value="years">Years (30 credits/year)</option>
-                <option value="unlimited">Unlimited (50 credits)</option>
+                <option value="years">Years (50 credits/year)</option>
+                <option value="unlimited">Unlimited (800 credits)</option>
             </select>
             <input type="number" id="customDurationValue" placeholder="Duration value" step="0.5">
             <button onclick="createCustomActivation()">CREATE ACTIVATION</button>
