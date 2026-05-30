@@ -56,13 +56,13 @@ VALID_USERS = {
 # 💰 CREDIT PRICING
 # ==================================================
 CREDIT_PRICING = {
-    "trial_hour": 0.1,
-    "custom_hour": 0.1,
-    "custom_day": 1,
-    "custom_week": 5,
-    "custom_month": 10,
-    "custom_year": 50,
-    "custom_unlimited": 800,
+    "trial_hour": 2,
+    "custom_hour": 2,
+    "custom_day": 5,
+    "custom_week": 8,
+    "custom_month": 50,
+    "custom_year": 800,
+    "custom_unlimited": 1500,
     "permanent": 500
 }
 
@@ -398,13 +398,13 @@ ADMIN_HTML = """
         <div id="generateTrial" class="content active">
             <h2>🎲 Generate Trial License</h2>
             <select id="trialDuration">
-                <option value="3">3 Hours (0.3 credits)</option>
-                <option value="6">6 Hours (0.6 credits)</option>
-                <option value="12">12 Hours (1.2 credits)</option>
-                <option value="24">1 Day (1 credit)</option>
-                <option value="72">3 Days (3 credits)</option>
-                <option value="168">1 Week (5 credits)</option>
-                <option value="720">1 Month (10 credits)</option>
+                <option value="3">3 Hours (2 credits)</option>
+                <option value="6">6 Hours (3 credits)</option>
+                <option value="12">12 Hours (4 credits)</option>
+                <option value="24">1 Day (5 credit)</option>
+                <option value="72">3 Days (10 credits)</option>
+                <option value="168">1 Week (20 credits)</option>
+                <option value="720">1 Month (50 credits)</option>
             </select>
             <button onclick="generateTrial()">GENERATE LICENSE</button>
             <div id="trialResult" class="result-box" style="display: none;"></div>
@@ -416,12 +416,12 @@ ADMIN_HTML = """
             <input type="text" id="customPassword" placeholder="Password *">
             <input type="text" id="customLicense" placeholder="License Key *">
             <select id="customDurationType">
-                <option value="hours">Hours (0.1 credits/hour)</option>
-                <option value="days">Days (1 credit/day)</option>
-                <option value="weeks">Weeks (5 credits/week)</option>
-                <option value="months">Months (10 credits/month)</option>
-                <option value="years">Years (50 credits/year)</option>
-                <option value="unlimited">Unlimited (800 credits)</option>
+                <option value="hours">Hours (2 credits/hour)</option>
+                <option value="days">Days (5 credit/day)</option>
+                <option value="weeks">Weeks (8 credits/week)</option>
+                <option value="months">Months (50 credits/month)</option>
+                <option value="years">Years (800 credits/year)</option>
+                <option value="unlimited">Unlimited (1500 credits)</option>
             </select>
             <input type="number" id="customDurationValue" placeholder="Duration value" step="0.5">
             <button onclick="createCustomActivation()">CREATE ACTIVATION</button>
