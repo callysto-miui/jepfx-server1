@@ -14,7 +14,7 @@ app = Flask(__name__)
 # ==================================================
 # 📂 PERMANENT DATA SAVE
 # ==================================================
-DATA_FILE = "server_data.json"
+DATA_FILE = os.environ.get("DATA_FILE_PATH", "server_data.json")
 
 # ==================================================
 # 🔗 REGISTRATION LINKS
